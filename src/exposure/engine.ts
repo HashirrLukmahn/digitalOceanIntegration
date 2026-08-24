@@ -1,0 +1,88 @@
+import type { RawInventory } from "../do/collectors";
+import { bySeverityDescending, type Severity } from "./severity";
+import {
+  databasePublicNoTrustedSourcesRule,
+  databaseTrustedSourceIsPublicRule,
+} from "./rules/database";
+import { appPlaintextSecretEnvRule } from "./rules/app-secrets";
+import { dropletNoFirewallRule, dropletOpenIngressRule } from "./rules/droplet";
+import {
+  appPublicIngressRule,
+  kubernetesPublicEndpointRule,
+  loadBalancerPublicRule,
+} from "./rules/network";
+import { spacePublicReadRule } from "./rules/space";
+import { buildContext, fingerprint, type DraftFinding, type ExposureRule } from "./types";
+
+/**
+ * The exposure engine.
+ *
+ * Every rule is deterministic and pure: same snapshot in, same findings out, with no
+ * network access and no model in the loop. A language model may later *explain* a
+ * finding, but nothing here asks one whether a finding exists.
+ */
+
+export const RULES: readonly ExposureRule[] = [
+  dropletNoFirewallRule,
+  dropletOpenIngressRule,
+  loadBalancerPublicRule,
+  databasePublicNoTrustedSourcesRule,
+  databaseTrustedSourceIsPublicRule,
+  kubernetesPublicEndpointRule,
+  appPublicIngressRule,
+  appPlaintextSecretEnvRule,
+  spacePublicReadRule,
+];
+
+export interface EvaluatedFinding extends DraftFinding {
+  /** Stable fingerprint; the primary key of `exposure_findings`. */
+  id: string;
+}
+
+export interface ExposureResult {
+  findings: EvaluatedFinding[];
+  /** External ids of every resource with at least one finding. */
+  exposedResourceIds: Set<string>;
+}
+
+export function evaluateExposure(
+  accountId: string,
+  inventory: RawInventory,
+  rules: readonly ExposureRule[] = RULES,
+): ExposureResult {
+  const context = buildContext(inventory);
+  const findings: EvaluatedFinding[] = [];
+  const seen = new Set<string>();
+
+  for (const rule of rules) {
+    for (const draft of rule.evaluate(context)) {
+      const id = fingerprint(accountId, draft);
+      // Two rules could in principle converge on the same fingerprint; keep the first
+      // so a run cannot produce duplicate primary keys.
+      if (seen.has(id)) continue;
+      seen.add(id);
+      findings.push({ ...draft, id });
+    }
+  }
+
+  findings.sort(bySeverityDescending);
+
+  return {
+    findings,
+    // Only reachability findings mark a resource as internet-exposed.
+    exposedResourceIds: new Set(
+      findings
+        .filter((f) => f.provesInternetExposure !== false)
+        .map((f) => f.resourceExternalId),
+    ),
+  };
+}
+
+/** Convenience for the UI: counts per severity. */
+export function severityBreakdown(
+  findings: readonly { severity: Severity }[],
+): Record<Severity, number> {
+  const counts: Record<Severity, number> = { critical: 0, high: 0, medium: 0, low: 0 };
+  for (const finding of findings) counts[finding.severity] += 1;
+  return counts;
+}

@@ -1,0 +1,127 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Two conventions carry meaning throughout the interface and are worth stating:
+ *
+ *   Monospace means verbatim. Anything set in Plex Mono came from DigitalOcean
+ *   exactly as shown -- a URN, a CIDR, a port range, an HTTP status. Prose is set
+ *   in Plex Sans. The reader can therefore tell our words from the provider's.
+ *
+ *   Dashed means unknown. A dashed border marks something this tool could not
+ *   determine, never something it determined to be safe. "Not assessed" and
+ *   "assessed and fine" must never look alike in a security tool.
+ */
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-paper text-ink font-sans antialiased;
+    font-feature-settings: "cv05" 1, "ss03" 1;
+  }
+
+  /* Keyboard focus stays visible everywhere, including on custom controls. */
+  :focus-visible {
+    outline: 2px solid theme("colors.accent");
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  th {
+    @apply text-left font-medium;
+  }
+}
+
+@layer components {
+  /* The identifier gutter: every object's stable external id, always monospace,
+     always the same treatment, so the eye can scan it down a column. It is the
+     join key between inventory, relationships, findings and the export. */
+  .urn {
+    @apply font-mono text-[0.75rem] text-muted whitespace-nowrap;
+  }
+
+  .eyebrow {
+    @apply text-micro uppercase tracking-[0.08em] text-faint font-medium;
+  }
+
+  .panel {
+    @apply bg-surface border border-rule rounded;
+  }
+
+  /* Marks a value the tool could not determine. Never used for a negative result. */
+  .unknown {
+    @apply border border-dashed border-rule text-faint rounded px-1.5 py-0.5 font-mono text-[0.75rem];
+  }
+
+  .cell {
+    @apply px-3 py-2 border-b border-rule align-top;
+  }
+
+  .table-head th {
+    @apply px-3 py-2 text-micro uppercase tracking-[0.08em] text-faint border-b border-rule bg-paper/60;
+  }
+
+  .row-link:hover {
+    @apply bg-paper;
+  }
+
+  /* Evidence is rendered as an exhibit rather than as prose: verbatim provider
+     values, framed, with the provenance of the conclusion stated above it. */
+  .exhibit {
+    @apply font-mono text-[0.78rem] leading-relaxed bg-paper border border-rule rounded p-3 overflow-x-auto;
+  }
+
+  .btn {
+    @apply inline-flex items-center gap-2 px-3 py-1.5 rounded border text-sm font-medium transition-colors;
+  }
+
+  .btn-primary {
+    @apply btn bg-accent text-white border-accent hover:bg-[#0A54DF] disabled:opacity-50;
+  }
+
+  .btn-quiet {
+    @apply btn bg-surface text-ink border-rule hover:bg-paper disabled:opacity-50;
+  }
+
+  .field {
+    @apply h-8 rounded border border-rule bg-surface px-2 text-sm text-ink;
+  }
+}
+
+/* Severity as a fill level rather than a badge.
+   Four quarters, filled in proportion to severity, so the ramp is legible without
+   relying on colour alone. */
+.sev {
+  display: inline-grid;
+  grid-template-columns: repeat(2, 4px);
+  grid-template-rows: repeat(2, 4px);
+  gap: 1px;
+  flex: none;
+}
+.sev i {
+  display: block;
+  background: currentColor;
+  opacity: 0.18;
+}
+.sev[data-level="low"] i:nth-child(3),
+.sev[data-level="medium"] i:nth-child(3),
+.sev[data-level="medium"] i:nth-child(4),
+.sev[data-level="high"] i:nth-child(1),
+.sev[data-level="high"] i:nth-child(3),
+.sev[data-level="high"] i:nth-child(4),
+.sev[data-level="critical"] i {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

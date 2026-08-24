@@ -1,0 +1,13 @@
+node_modules/
+.next/
+out/
+dist/
+*.log
+coverage/
+.env
+.env.local
+# Local database and its WAL sidecars. Never commit: may contain account data.
+*.db
+*.db-shm
+*.db-wal
+data/
