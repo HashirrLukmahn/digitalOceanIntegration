@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt } from "drizzle-orm";
 import { getDb, type Database } from "../db/client";
 import {
   cloudAccounts,
@@ -130,13 +130,11 @@ export async function runSync(options: SyncOptions): Promise<SyncResult> {
     }
   }
 
-  // Spaces coverage is reported by mode, since "assessed 3 named buckets" and
-  // "enumerated the account" are very different claims and the reader deserves to
-  // know which one happened.
   if (inventory.spacesMode !== "unavailable") {
-    coverage.completedCollectors = coverage.completedCollectors.map((name) =>
-      name === "spaces" ? `spaces (${inventory.spacesMode}, ${inventory.spaces.length} bucket(s))` : name,
-    );
+    coverage.spaces = {
+      mode: inventory.spacesMode,
+      bucketsAssessed: inventory.spaces.length,
+    };
   }
 
   // --- 3. Normalize, relate, evaluate --------------------------------------------
@@ -401,20 +399,4 @@ function upsertAccount(
     })
     .run();
   return id;
-}
-
-/** The account this app is connected to, if a sync has ever run. */
-export function currentAccount(db: Database = getDb()) {
-  const [account] = db.select().from(cloudAccounts).limit(1).all();
-  return account ?? null;
-}
-
-export function recentSyncRuns(accountId: string, limit = 25, db: Database = getDb()) {
-  return db
-    .select()
-    .from(syncRuns)
-    .where(eq(syncRuns.accountId, accountId))
-    .orderBy(sql`${syncRuns.startedAt} desc`)
-    .limit(limit)
-    .all();
 }

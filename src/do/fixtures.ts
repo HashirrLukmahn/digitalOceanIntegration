@@ -439,5 +439,3 @@ export class FixtureDoHttp implements DoHttp {
     return { links: { pages: {} } } as T;
   }
 }
-
-export const fixtureTeam = TEAM;

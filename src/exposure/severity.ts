@@ -61,10 +61,6 @@ export function maxSeverity(a: Severity, b: Severity): Severity {
   return RANK[a] >= RANK[b] ? a : b;
 }
 
-export function severityRank(severity: Severity): number {
-  return RANK[severity];
-}
-
 /** Descending severity, for the findings list. */
 export function bySeverityDescending<T extends { severity: Severity }>(a: T, b: T): number {
   return RANK[b.severity] - RANK[a.severity];

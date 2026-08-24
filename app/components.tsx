@@ -104,6 +104,14 @@ export function Coverage({ coverage }: { coverage: SyncCoverage }) {
     ...(coverage.unavailableCollectors ?? []).map((c) => ({ ...c, kind: "unavailable" as const })),
   ];
 
+  const spaces = coverage.spaces ? (
+    <p className="mt-2 text-[0.78rem] text-muted">
+      Object storage: {coverage.spaces.bucketsAssessed} named bucket(s) assessed in{" "}
+      <span className="font-mono">{coverage.spaces.mode}</span> mode. Account-wide bucket
+      enumeration is not available to a read-only credential.
+    </p>
+  ) : null;
+
   if (gaps.length === 0) {
     return (
       <div className="panel px-4 py-3 text-sm">
@@ -111,6 +119,7 @@ export function Coverage({ coverage }: { coverage: SyncCoverage }) {
         <span className="text-muted">
           All {coverage.completedCollectors.length} collectors ran.
         </span>
+        {spaces}
       </div>
     );
   }
@@ -127,6 +136,7 @@ export function Coverage({ coverage }: { coverage: SyncCoverage }) {
           </li>
         ))}
       </ul>
+      {spaces}
       <p className="mt-3 text-[0.78rem] text-faint">
         Findings below describe only what was assessed. An absent finding is not evidence of a
         safe configuration for anything listed here.

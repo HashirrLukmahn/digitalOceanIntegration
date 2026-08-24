@@ -6,8 +6,10 @@ import {
   findingFacets,
   getAccount,
   getLatestRun,
+  inventoryFacets,
   listFindings,
 } from "../../src/data/queries";
+import { label } from "../labels";
 
 export const dynamic = "force-dynamic";
 
@@ -32,13 +34,15 @@ export default async function ExposuresPage({
 
   const run = getLatestRun(account.id);
   const facets = findingFacets(account.id);
+  const types = inventoryFacets(account.id).types;
   const summary = counts(account.id);
   const findings = listFindings(account.id, {
     severity: params.severity,
     kind: params.kind,
+    resourceType: params.resourceType,
   });
 
-  const filtered = Boolean(params.severity || params.kind);
+  const filtered = Boolean(params.severity || params.kind || params.resourceType);
 
   return (
     <div className="space-y-6">
@@ -73,8 +77,9 @@ export default async function ExposuresPage({
         })}
 
         {facets.kinds.length > 0 && (
-          <form className="panel ml-auto flex items-center gap-2 px-3 py-2" action="/exposures">
+          <form className="panel ml-auto flex flex-wrap items-center gap-2 px-3 py-2" action="/exposures">
             {params.severity && <input type="hidden" name="severity" value={params.severity} />}
+
             <label htmlFor="kind" className="eyebrow">
               Kind
             </label>
@@ -86,9 +91,32 @@ export default async function ExposuresPage({
                 </option>
               ))}
             </select>
+
+            <label htmlFor="resourceType" className="eyebrow">
+              Resource
+            </label>
+            <select
+              id="resourceType"
+              name="resourceType"
+              defaultValue={params.resourceType ?? ""}
+              className="field"
+            >
+              <option value="">All</option>
+              {types.map((type) => (
+                <option key={type} value={type}>
+                  {label(type)}
+                </option>
+              ))}
+            </select>
+
             <button type="submit" className="btn-quiet">
               Apply
             </button>
+            {filtered && (
+              <Link href="/exposures" className="text-[0.8rem] text-accent hover:underline">
+                Clear
+              </Link>
+            )}
           </form>
         )}
       </div>

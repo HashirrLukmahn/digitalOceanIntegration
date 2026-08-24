@@ -31,9 +31,4 @@ export function getDb(): Database {
   return db;
 }
 
-/** Test seam: point the module at an in-memory or temporary database. */
-export function setDb(next: Database | undefined): void {
-  db = next;
-}
-
 export { schema };

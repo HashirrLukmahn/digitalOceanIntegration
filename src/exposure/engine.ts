@@ -1,5 +1,5 @@
 import type { RawInventory } from "../do/collectors";
-import { bySeverityDescending, type Severity } from "./severity";
+import { bySeverityDescending } from "./severity";
 import {
   databasePublicNoTrustedSourcesRule,
   databaseTrustedSourceIsPublicRule,
@@ -76,13 +76,4 @@ export function evaluateExposure(
         .map((f) => f.resourceExternalId),
     ),
   };
-}
-
-/** Convenience for the UI: counts per severity. */
-export function severityBreakdown(
-  findings: readonly { severity: Severity }[],
-): Record<Severity, number> {
-  const counts: Record<Severity, number> = { critical: 0, high: 0, medium: 0, low: 0 };
-  for (const finding of findings) counts[finding.severity] += 1;
-  return counts;
 }

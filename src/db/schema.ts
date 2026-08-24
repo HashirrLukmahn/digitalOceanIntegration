@@ -57,6 +57,14 @@ export interface SyncCoverage {
   completedCollectors: string[];
   failedCollectors: Array<{ collector: string; message: string }>;
   unavailableCollectors: Array<{ collector: string; message: string }>;
+  /**
+   * Which Spaces capability was available, when it ran at all.
+   *
+   * Its own field rather than a note appended to the collector name: "assessed 3
+   * named buckets" and "enumerated the account" are different claims, and a reader
+   * should not have to parse a string to tell them apart.
+   */
+  spaces?: { mode: string; bucketsAssessed: number };
 }
 
 /** One row per attempted inventory sync. */
