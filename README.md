@@ -185,3 +185,8 @@ that drifts from the schema fails the suite.
 Summarised in [DESIGN-NOTES.md](DESIGN-NOTES.md). The short version: Spaces buckets
 cannot be enumerated with a read-only token, and API tokens and team member roles have
 no API at all — those are permanent blind spots, stated rather than worked around.
+
+## Ideas and deferred features
+
+Features considered and not shipped, with tradeoffs and what would trigger building
+each: [IDEAS.md](IDEAS.md).
