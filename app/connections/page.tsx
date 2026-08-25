@@ -3,6 +3,8 @@ import { connectionState } from "../../src/connection/state";
 import { oauthConfig } from "../../src/oauth/digitalocean";
 import { hasMasterKey } from "../../src/oauth/crypto";
 import { dataSource } from "../../src/lib/env";
+import { counts, getAccount } from "../../src/data/queries";
+import { DisconnectButton } from "../disconnect-button";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +15,9 @@ const REDIRECT_REASONS: Record<string, string> = {
   never_synced:
     "The credential works, but no snapshot has been built from it yet. Run a sync and the " +
     "rest of the app opens up.",
+  disconnected:
+    "Disconnected. The stored credential and everything synced from it have been deleted. " +
+    "Connect again to start over.",
 };
 
 /** Off until proven on. */
@@ -62,6 +67,10 @@ export default async function ConnectionMethodPage({
   const explanation = reason ? REDIRECT_REASONS[reason] : undefined;
 
   const state = connectionState();
+  const account = getAccount();
+  const summary = account
+    ? counts(account.id)
+    : { resources: 0, findings: 0 };
   const oauthReady = Boolean(oauthConfig()) && hasMasterKey();
   const usingFixtures = dataSource() === "fixtures";
 
@@ -87,6 +96,10 @@ export default async function ConnectionMethodPage({
       </header>
 
       <StatusRow state={state} />
+
+      {state.stage !== "disconnected" && (
+        <DisconnectButton counts={{ resources: summary.resources, findings: summary.findings }} />
+      )}
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="panel flex flex-col p-5">
