@@ -59,6 +59,32 @@ interface OpenThread {
   messages: UIMessage[];
 }
 
+/** Which conversation this browser tab is in. */
+const SESSION_KEY = "do-scan.thread";
+
+/**
+ * sessionStorage is per-tab and dies with it, which is exactly the lifetime wanted:
+ * the conversation survives navigating to the inventory and back, and a reload, but a
+ * new tab starts clean and closing the tab ends it. Wrapped because it throws outright
+ * in some privacy modes rather than returning null.
+ */
+function readSessionThread(): string | null {
+  try {
+    return sessionStorage.getItem(SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionThread(id: string): void {
+  try {
+    sessionStorage.setItem(SESSION_KEY, id);
+  } catch {
+    // Storage unavailable. The conversation still works, it just will not survive
+    // navigation — which is a degraded experience, not a broken one.
+  }
+}
+
 /**
  * Owns which conversation is open; the inner component owns the conversation itself.
  *
@@ -68,17 +94,60 @@ interface OpenThread {
  * a loaded thread arrives as initial state rather than as a later mutation.
  */
 export function Chat() {
-  const [thread, setThread] = useState<OpenThread>(() => ({ id: newThreadId(), messages: [] }));
+  // null while restoring. sessionStorage is unavailable during server rendering, so
+  // the tab's thread can only be resolved once mounted.
+  const [thread, setThread] = useState<OpenThread | null>(null);
   const [historyKey, setHistoryKey] = useState(0);
 
-  const startNew = () => setThread({ id: newThreadId(), messages: [] });
+  useEffect(() => {
+    const existing = readSessionThread();
+
+    if (!existing) {
+      const id = newThreadId();
+      writeSessionThread(id);
+      setThread({ id, messages: [] });
+      return;
+    }
+
+    let cancelled = false;
+    fetch(`/api/threads/${existing}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { messages?: UIMessage[] } | null) => {
+        if (cancelled) return;
+        // A thread id with nothing saved yet is normal: the tab was opened and
+        // navigated away from before anything was asked.
+        setThread({ id: existing, messages: body?.messages ?? [] });
+      })
+      .catch(() => {
+        if (!cancelled) setThread({ id: existing, messages: [] });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const open = (next: OpenThread) => {
+    writeSessionThread(next.id);
+    setThread(next);
+  };
+
+  const startNew = () => open({ id: newThreadId(), messages: [] });
 
   const load = async (id: string) => {
     const response = await fetch(`/api/threads/${id}`);
     if (!response.ok) return;
     const body = (await response.json()) as { messages?: UIMessage[] };
-    setThread({ id, messages: body.messages ?? [] });
+    open({ id, messages: body.messages ?? [] });
   };
+
+  if (!thread) {
+    return (
+      <div className="mx-auto max-w-3xl py-10" aria-busy="true">
+        <div className="shimmer h-3 w-56" />
+      </div>
+    );
+  }
 
   return (
     <ChatThread
