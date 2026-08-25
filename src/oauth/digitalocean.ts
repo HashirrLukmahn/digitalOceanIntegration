@@ -16,7 +16,16 @@ import { decrypt, encrypt } from "./crypto";
 const AUTHORIZE_URL = "https://cloud.digitalocean.com/v1/oauth/authorize";
 const TOKEN_URL = "https://cloud.digitalocean.com/v1/oauth/token";
 
-const STATE_TTL_MS = 10 * 60 * 1000;
+/**
+ * How long an authorization may sit unfinished.
+ *
+ * Thirty minutes rather than ten: the user may have to sign in to DigitalOcean, and
+ * possibly clear MFA, before they even see the consent screen. A window that expires
+ * mid-login rejects a legitimate authorization and looks like a broken integration.
+ * The state is still single-use, which is what actually prevents replay — the TTL
+ * only bounds how long an abandoned one lingers.
+ */
+const STATE_TTL_MS = 30 * 60 * 1000;
 /** One row, one id. */
 export const CONNECTION_ID = "digitalocean";
 

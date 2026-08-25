@@ -12,3 +12,12 @@ coverage/
 *.db-wal
 /data/
 .env.provision
+
+# Agent tooling dropped in by editors; not part of this project.
+.agents/
+
+# TypeScript incremental build cache.
+*.tsbuildinfo
+
+# Editor-installed skill packs; not part of this project.
+.claude/skills/

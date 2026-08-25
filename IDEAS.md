@@ -55,11 +55,21 @@ are single-use — concurrent refreshes race and the loser permanently breaks th
 connection, so refresh must hold a row lock), and reactive revocation handling since
 DigitalOcean sends no webhook.
 
-**Unverified.** Whether OAuth can request the granular `droplet:read` style scopes or
-only the `api:read` alias. The OAuth reference links to the full granular list, which
-implies the former, but never states it. One authorize URL in a browser settles it.
+**Answered.** OAuth does **not** use the granular scope namespace. Requesting
+`scope=api:read` produces a consent screen reading "REQUIRES THE FOLLOWING ACCESS:
+READ", and the token response returns `scope: "read"` — not `api:read`, and not
+`droplet:read`. DigitalOcean's OAuth still uses the coarse `read` / `write` scopes;
+the granular list the docs link to applies to personal access tokens only.
 
-**Trigger.** The first customer who is not us.
+Practically this costs nothing: `read` grants every read the scanner needs. But it
+means OAuth cannot be used to request *less* than full read access, so "least
+privilege" here means read-vs-write, not per-resource.
+
+**Built.** The flow is implemented — authorize redirect, single-use hashed state with
+a thirty-minute window, code exchange, AES-256-GCM token storage, and an automatic
+first sync. Tokens expire after 30 days and a refresh token is returned.
+
+**Trigger.** Done for a single connection. Multi-tenant is entry 3.
 
 ---
 

@@ -190,3 +190,13 @@ no API at all — those are permanent blind spots, stated rather than worked aro
 
 Features considered and not shipped, with tradeoffs and what would trigger building
 each: [IDEAS.md](IDEAS.md).
+
+## Operational endpoints
+
+| Endpoint | Question it answers |
+|---|---|
+| `GET /api/health` | Is this process serving? Database only — never calls DigitalOcean, so their outage cannot mark this app unhealthy. |
+| `GET /api/status` | Is the stored credential still valid? Makes one read of `/v2/account`, since DigitalOcean sends no notification when access is revoked. `?probe=false` skips it. |
+
+`/api/status` reports the credential source, granted scopes, expiry, and last sync.
+It returns a four-character fingerprint, never the token.
