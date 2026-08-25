@@ -128,13 +128,13 @@ export function HistoryDrawer({ activeId, onSelect, onNew, refreshKey }: Props) 
               ) : (
                 <ul className="space-y-0.5">
                   {threads.map((thread) => (
-                    <li key={thread.id} className="group flex items-center gap-1">
+                    <li key={thread.id} className="group flex min-w-0 items-center gap-1">
                       <button
                         onClick={() => {
                           onSelect(thread.id);
                           setOpen(false);
                         }}
-                        className={`flex-1 rounded px-2 py-2 text-left hover:bg-paper ${
+                        className={`min-w-0 flex-1 rounded px-2 py-2 text-left hover:bg-paper ${
                           thread.id === activeId ? "bg-paper" : ""
                         }`}
                       >
@@ -146,8 +146,9 @@ export function HistoryDrawer({ activeId, onSelect, onNew, refreshKey }: Props) 
                         </span>
                       </button>
                       <button
+                        type="button"
                         onClick={() => remove(thread.id)}
-                        className="rounded px-1.5 py-1 text-[0.75rem] text-faint opacity-0 transition-opacity hover:text-critical focus-visible:opacity-100 group-hover:opacity-100"
+                        className="flex-none rounded px-1.5 py-1 text-[0.75rem] text-faint opacity-0 transition-opacity hover:text-critical focus-visible:opacity-100 group-hover:opacity-100"
                         aria-label={`Delete ${thread.title}`}
                       >
                         ✕

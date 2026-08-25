@@ -1,8 +1,9 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
+import type { UIMessage } from "ai";
 import Link from "next/link";
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { HistoryDrawer } from "./history-drawer";
 import { Thinking } from "./thinking";
 
@@ -53,17 +54,70 @@ const TOOL_LABELS: Record<string, string> = {
 const newThreadId = () =>
   typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
 
+interface OpenThread {
+  id: string;
+  messages: UIMessage[];
+}
+
+/**
+ * Owns which conversation is open; the inner component owns the conversation itself.
+ *
+ * The split exists because `useChat` keys its state on `id`, so changing the id and
+ * seeding messages in the same render race each other — the id change wins and the
+ * seeded messages are discarded. Remounting on `key={id}` sidesteps it entirely:
+ * a loaded thread arrives as initial state rather than as a later mutation.
+ */
 export function Chat() {
-  const [threadId, setThreadId] = useState(newThreadId);
-  const [input, setInput] = useState("");
+  const [thread, setThread] = useState<OpenThread>(() => ({ id: newThreadId(), messages: [] }));
   const [historyKey, setHistoryKey] = useState(0);
 
-  const { messages, setMessages, sendMessage, status, error } = useChat({ id: threadId });
+  const startNew = () => setThread({ id: newThreadId(), messages: [] });
+
+  const load = async (id: string) => {
+    const response = await fetch(`/api/threads/${id}`);
+    if (!response.ok) return;
+    const body = (await response.json()) as { messages?: UIMessage[] };
+    setThread({ id, messages: body.messages ?? [] });
+  };
+
+  return (
+    <ChatThread
+      key={thread.id}
+      id={thread.id}
+      initialMessages={thread.messages}
+      historyKey={historyKey}
+      onTurnComplete={() => setHistoryKey((k) => k + 1)}
+      onSelectThread={load}
+      onNewThread={startNew}
+    />
+  );
+}
+
+interface ThreadProps {
+  id: string;
+  initialMessages: UIMessage[];
+  historyKey: number;
+  onTurnComplete: () => void;
+  onSelectThread: (id: string) => void;
+  onNewThread: () => void;
+}
+
+function ChatThread({
+  id,
+  initialMessages,
+  historyKey,
+  onTurnComplete,
+  onSelectThread,
+  onNewThread,
+}: ThreadProps) {
+  const [input, setInput] = useState("");
+  const { messages, sendMessage, status, error } = useChat({ id, messages: initialMessages });
   const busy = status === "submitted" || status === "streaming";
 
   // Refresh the drawer once a turn settles, so a new conversation gets its title.
   useEffect(() => {
-    if (status === "ready" && messages.length > 0) setHistoryKey((k) => k + 1);
+    if (status === "ready" && messages.length > 0) onTurnComplete();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, messages.length]);
 
   const send = (text: string) => {
@@ -73,26 +127,11 @@ export function Chat() {
     setInput("");
   };
 
-  const startNew = useCallback(() => {
-    setThreadId(newThreadId());
-    setMessages([]);
-  }, [setMessages]);
-
-  const load = useCallback(
-    async (id: string) => {
-      const response = await fetch(`/api/threads/${id}`);
-      if (!response.ok) return;
-      const body = (await response.json()) as { messages?: unknown[] };
-      setThreadId(id);
-      setMessages((body.messages ?? []) as never);
-    },
-    [setMessages],
-  );
-
   // The step the assistant is on, for the waiting label.
-  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
-  const activeTool = lastAssistant?.parts
-    ?.filter((p) => p.type.startsWith("tool-"))
+  const activeTool = [...messages]
+    .reverse()
+    .find((m) => m.role === "assistant")
+    ?.parts?.filter((p) => p.type.startsWith("tool-"))
     .map((p) => TOOL_LABELS[p.type.slice("tool-".length)])
     .filter(Boolean)
     .at(-1);
@@ -101,13 +140,13 @@ export function Chat() {
     <div className="mx-auto flex min-h-[calc(100vh-13rem)] max-w-3xl flex-col">
       <div className="flex items-center justify-between py-2">
         <HistoryDrawer
-          activeId={threadId}
-          onSelect={load}
-          onNew={startNew}
+          activeId={id}
+          onSelect={onSelectThread}
+          onNew={onNewThread}
           refreshKey={historyKey}
         />
         {messages.length > 0 && (
-          <button onClick={startNew} className="btn-quiet">
+          <button onClick={onNewThread} className="btn-quiet">
             New conversation
           </button>
         )}
