@@ -125,3 +125,48 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* --- Thinking states -------------------------------------------------------------
+   Two signals, doing different jobs. The ellipsis says "still working" without
+   claiming progress it cannot measure. The shimmer marks the region where text is
+   about to appear, so the eye is already in the right place when it does. */
+
+@keyframes ellipsis {
+  0%, 20%  { opacity: 0.15; }
+  50%      { opacity: 1; }
+  100%     { opacity: 0.15; }
+}
+
+.dots span {
+  animation: ellipsis 1.25s ease-in-out infinite;
+}
+.dots span:nth-child(2) { animation-delay: 0.18s; }
+.dots span:nth-child(3) { animation-delay: 0.36s; }
+
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    theme("colors.rule") 0%,
+    theme("colors.rule") 30%,
+    #EFF2F6 50%,
+    theme("colors.rule") 70%,
+    theme("colors.rule") 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s linear infinite;
+  border-radius: 3px;
+}
+
+/* Motion is decoration here; the text still arrives without it. */
+@media (prefers-reduced-motion: reduce) {
+  .dots span,
+  .shimmer {
+    animation: none;
+  }
+  .shimmer { background: theme("colors.rule"); }
+}

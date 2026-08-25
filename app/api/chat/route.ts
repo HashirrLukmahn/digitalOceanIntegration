@@ -2,6 +2,7 @@ import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from 
 import { agentApiKey, agentModel, MISSING_KEY_MESSAGE } from "../../../src/agent/model";
 import { buildTools } from "../../../src/agent/tools";
 import { getAccount } from "../../../src/data/queries";
+import { saveThread } from "../../../src/data/threads";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,16 +40,23 @@ export async function POST(request: Request) {
   }
   if (!agentApiKey()) return new Response(MISSING_KEY_MESSAGE, { status: 400 });
 
-  const { messages }: { messages: UIMessage[] } = await request.json();
+  const { messages, id }: { messages: UIMessage[]; id?: string } = await request.json();
 
   const result = streamText({
     model: agentModel(),
     system: SYSTEM,
     messages: await convertToModelMessages(messages),
-    tools: buildTools(account.id),
+    tools: buildTools(account.id, { allowRefresh: true }),
     // Same safety bound as the batch agent: a loop that cannot stop is an open bill.
     stopWhen: stepCountIs(15),
   });
 
-  return result.toUIMessageStreamResponse();
+  return result.toUIMessageStreamResponse({
+    originalMessages: messages,
+    // Persist once the turn is complete, so a reload or the history drawer shows the
+    // whole exchange rather than the half that had streamed.
+    onFinish: ({ messages: finalMessages }) => {
+      if (id) saveThread(id, account.id, finalMessages);
+    },
+  });
 }

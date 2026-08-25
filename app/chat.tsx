@@ -2,27 +2,22 @@
 
 import { useChat } from "@ai-sdk/react";
 import Link from "next/link";
-import { Fragment, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
+import { HistoryDrawer } from "./history-drawer";
+import { Thinking } from "./thinking";
 
 /**
  * The assistant.
  *
- * Two things make this different from a generic chat window, and both matter for a
- * security tool. Every external id the model writes becomes a link to that resource's
- * page, so a claim is one click from the evidence behind it. And the tool calls are
- * shown as they happen, so a reader can see which data an answer was built from
- * rather than taking the prose on trust.
+ * Two things make this a security tool rather than a generic chat window. Every
+ * external id it writes becomes a link to that resource's page, so a claim is one
+ * click from the evidence behind it. And its tool calls are shown as they happen, so
+ * a reader can see which data an answer was built from instead of trusting the prose.
  */
 
 /** `do:droplet:12345` — the id scheme every resource shares. */
 const URN = /\b(do:[a-z_]+:[A-Za-z0-9][A-Za-z0-9._-]*)/g;
 
-/**
- * Turns cited ids into links.
- *
- * The model is instructed to cite inline, so this is what makes "verify it yourself"
- * a click rather than a search.
- */
 function withCitations(text: string) {
   return text.split(URN).map((part, index) =>
     index % 2 === 1 ? (
@@ -46,17 +41,30 @@ const SUGGESTIONS = [
   "Summarise this account's security posture.",
 ];
 
+/** Named so the wait reads as progress rather than a hang. */
 const TOOL_LABELS: Record<string, string> = {
   query_resources: "Reading resources",
   query_rule_findings: "Reading rule findings",
   query_relationships: "Following relationships",
-  report_findings: "Reporting",
+  refresh_snapshot: "Re-syncing from DigitalOcean",
+  report_findings: "Writing up",
 };
 
+const newThreadId = () =>
+  typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+
 export function Chat() {
+  const [threadId, setThreadId] = useState(newThreadId);
   const [input, setInput] = useState("");
-  const { messages, sendMessage, status, error } = useChat();
+  const [historyKey, setHistoryKey] = useState(0);
+
+  const { messages, setMessages, sendMessage, status, error } = useChat({ id: threadId });
   const busy = status === "submitted" || status === "streaming";
+
+  // Refresh the drawer once a turn settles, so a new conversation gets its title.
+  useEffect(() => {
+    if (status === "ready" && messages.length > 0) setHistoryKey((k) => k + 1);
+  }, [status, messages.length]);
 
   const send = (text: string) => {
     const trimmed = text.trim();
@@ -65,8 +73,46 @@ export function Chat() {
     setInput("");
   };
 
+  const startNew = useCallback(() => {
+    setThreadId(newThreadId());
+    setMessages([]);
+  }, [setMessages]);
+
+  const load = useCallback(
+    async (id: string) => {
+      const response = await fetch(`/api/threads/${id}`);
+      if (!response.ok) return;
+      const body = (await response.json()) as { messages?: unknown[] };
+      setThreadId(id);
+      setMessages((body.messages ?? []) as never);
+    },
+    [setMessages],
+  );
+
+  // The step the assistant is on, for the waiting label.
+  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+  const activeTool = lastAssistant?.parts
+    ?.filter((p) => p.type.startsWith("tool-"))
+    .map((p) => TOOL_LABELS[p.type.slice("tool-".length)])
+    .filter(Boolean)
+    .at(-1);
+
   return (
     <div className="mx-auto flex min-h-[calc(100vh-13rem)] max-w-3xl flex-col">
+      <div className="flex items-center justify-between py-2">
+        <HistoryDrawer
+          activeId={threadId}
+          onSelect={load}
+          onNew={startNew}
+          refreshKey={historyKey}
+        />
+        {messages.length > 0 && (
+          <button onClick={startNew} className="btn-quiet">
+            New conversation
+          </button>
+        )}
+      </div>
+
       {messages.length === 0 ? (
         <div className="flex flex-1 flex-col justify-center py-10">
           <h1 className="text-2xl font-semibold tracking-tight">
@@ -90,7 +136,7 @@ export function Chat() {
           </div>
         </div>
       ) : (
-        <div className="flex-1 space-y-6 py-6">
+        <div className="flex-1 space-y-6 py-4">
           {messages.map((message) => (
             <div key={message.id}>
               <div className="eyebrow mb-1.5">{message.role === "user" ? "You" : "Assistant"}</div>
@@ -107,15 +153,12 @@ export function Chat() {
                   );
                 }
 
-                // Tool activity, shown so an answer's sources are visible rather than implied.
                 if (part.type.startsWith("tool-")) {
                   const name = part.type.slice("tool-".length);
                   return (
-                    <div key={index} className="my-1.5 flex items-center gap-2">
-                      <span className="font-mono text-[0.72rem] text-faint">
-                        {TOOL_LABELS[name] ?? name}
-                      </span>
-                    </div>
+                    <p key={index} className="my-1 font-mono text-[0.72rem] text-faint">
+                      {TOOL_LABELS[name] ?? name}
+                    </p>
                   );
                 }
 
@@ -124,7 +167,12 @@ export function Chat() {
             </div>
           ))}
 
-          {busy && <p className="text-[0.8rem] text-faint">Thinking…</p>}
+          {busy && (
+            <div>
+              <div className="eyebrow mb-1.5">Assistant</div>
+              <Thinking label={activeTool ?? "Thinking"} />
+            </div>
+          )}
         </div>
       )}
 
@@ -161,7 +209,8 @@ export function Chat() {
           </button>
         </div>
         <p className="mt-2 text-[0.72rem] text-faint">
-          Reads the stored snapshot only. It cannot reach DigitalOcean or change anything.
+          Reads the stored snapshot, and can re-sync from DigitalOcean if you ask. It cannot
+          change anything.
         </p>
       </form>
     </div>

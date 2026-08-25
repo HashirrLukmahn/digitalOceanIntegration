@@ -266,3 +266,30 @@ export const agentRuns = sqliteTable(
 );
 
 export type AgentRunRow = typeof agentRuns.$inferSelect;
+
+/**
+ * A saved conversation.
+ *
+ * Messages live as one JSON blob rather than a rows-per-message table: they are only
+ * ever read and written whole, and a normalised table would buy nothing but joins.
+ */
+export const chatThreads = sqliteTable(
+  "chat_threads",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => cloudAccounts.id, { onDelete: "cascade" }),
+    /** First words of the opening question. Enough to find a conversation again. */
+    title: text("title").notNull(),
+    messagesJson: text("messages_json", { mode: "json" })
+      .$type<unknown[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    createdAt: ts("created_at").notNull(),
+    updatedAt: ts("updated_at").notNull(),
+  },
+  (t) => [index("chat_threads_account_updated_idx").on(t.accountId, t.updatedAt)],
+);
+
+export type ChatThreadRow = typeof chatThreads.$inferSelect;

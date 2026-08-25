@@ -15,6 +15,13 @@
       "when": 1787689535542,
       "tag": "0001_agent_runs",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1787694395174,
+      "tag": "0002_chat_threads",
+      "breakpoints": true
     }
   ]
 }
