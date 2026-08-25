@@ -1,6 +1,7 @@
 import { Chat } from "./chat";
 import { Empty } from "./components";
 import { getAccount, getLatestRun } from "../src/data/queries";
+import { agentApiKey } from "../src/agent/model";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,7 @@ export default function Home() {
   }
 
   const run = getLatestRun(account.id);
-  const noKey = !process.env.ANTHROPIC_API_KEY;
+  const noKey = !agentApiKey();
 
   return (
     <>

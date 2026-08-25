@@ -155,6 +155,45 @@ silent gap.
 
 ---
 
+## 8. Local model, self-hosted
+
+**Idea.** Run the assistant against a model inside our own environment rather than a
+hosted API, so account inventory never leaves the network. Ollama serving an open
+model to start; distillation onto a smaller task-specific model later.
+
+**Why it matters more here than for most products.** The assistant sends resource
+inventory to whichever provider serves it — droplet names, public IPs, VPC topology,
+firewall rules, which databases are reachable. That is a map of how to attack the
+account. A security vendor leaking it would be the whole business.
+
+Today's posture is a proof of concept, not a production one: the key in use routes
+through OpenRouter, so that data crosses two parties rather than one. Acceptable for a
+sandbox account we created; not acceptable for a customer's.
+
+**Costs.** Hosting and GPU capacity, and open models are generally weaker at
+multi-step tool calling — which is the entire mechanic here, not a nice-to-have.
+
+**The swap itself is small.** Every model reference goes through `agentModel()` in
+`src/agent/model.ts`. Ollama is OpenAI-compatible, so this is the same shape as the
+OpenRouter change already in that file:
+
+```ts
+createOpenAICompatible({ baseURL: "http://localhost:11434/v1" })("qwen2.5:32b")
+```
+
+**Do the cheap experiment first.** Distillation is a real programme — dataset,
+training, evaluation, drift management. Before any of that, check whether a stock
+open model already clears the bar: point `agentModel()` at Ollama, run the same
+account, and compare against the hosted run. The measure is not prose quality, it is
+whether it calls the right tools in the right order and stops when it should. If an
+off-the-shelf model does that, distillation buys latency and cost, not capability —
+and that is a much smaller argument for a much larger project.
+
+**Trigger.** Any account we do not own. Before that, it is worth one afternoon of
+measurement rather than a roadmap item.
+
+---
+
 ## Asked and answered: not possible
 
 Recorded so they stop being re-proposed. Both were requested and neither is buildable

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { agentApiKey, MISSING_KEY_MESSAGE } from "../../../src/agent/model";
 import { runAgent } from "../../../src/agent/run";
 import { getAccount } from "../../../src/data/queries";
 import { sanitizeError } from "../../../src/lib/redact";
@@ -17,16 +18,8 @@ export async function POST() {
     );
   }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          "ANTHROPIC_API_KEY is not set. The agent needs a key of ours (separate from the " +
-          "DigitalOcean token) to call the model.",
-      },
-      { status: 400 },
-    );
+  if (!agentApiKey()) {
+    return NextResponse.json({ ok: false, error: MISSING_KEY_MESSAGE }, { status: 400 });
   }
 
   try {

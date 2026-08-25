@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { anthropic } from "@ai-sdk/anthropic";
 import { ToolLoopAgent, hasToolCall, isStepCount, type LanguageModel } from "ai";
 import { desc, eq } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { agentRuns, type AgentFinding, type AgentOutcome } from "../db/schema";
 import { sanitizeError } from "../lib/redact";
 import { logger } from "../lib/logger";
+import { agentModel } from "./model";
 import { buildTools, withRepeatGuard } from "./tools";
 
 /**
@@ -88,7 +88,7 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentRunResult
 
   try {
     const agent = new ToolLoopAgent({
-      model: options.model ?? anthropic("claude-opus-5"),
+      model: options.model ?? agentModel(),
       instructions: SYSTEM_PROMPT,
       tools: withRepeatGuard(buildTools(accountId)),
       // The terminal tool is the normal exit. The step cap is the safety bound and

@@ -1,5 +1,5 @@
-import { anthropic } from "@ai-sdk/anthropic";
 import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from "ai";
+import { agentApiKey, agentModel, MISSING_KEY_MESSAGE } from "../../../src/agent/model";
 import { buildTools } from "../../../src/agent/tools";
 import { getAccount } from "../../../src/data/queries";
 
@@ -37,17 +37,12 @@ export async function POST(request: Request) {
   if (!account) {
     return new Response("Run a sync first — there is no snapshot to read.", { status: 409 });
   }
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return new Response(
-      "ANTHROPIC_API_KEY is not set. Add it to .env to enable the assistant.",
-      { status: 400 },
-    );
-  }
+  if (!agentApiKey()) return new Response(MISSING_KEY_MESSAGE, { status: 400 });
 
   const { messages }: { messages: UIMessage[] } = await request.json();
 
   const result = streamText({
-    model: anthropic("claude-opus-5"),
+    model: agentModel(),
     system: SYSTEM,
     messages: await convertToModelMessages(messages),
     tools: buildTools(account.id),
