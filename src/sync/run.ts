@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNull, lt } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm";
 import { getDb, type Database } from "../db/client";
 import {
   cloudAccounts,
@@ -74,7 +74,12 @@ export async function runSync(options: SyncOptions): Promise<SyncResult> {
     // We could not even establish who we are talking to. If a previous sync recorded
     // an account, attach a failed run to it so the failure is visible in the UI;
     // otherwise there is nothing to attach to and the caller reports it directly.
-    const [existing] = db.select().from(cloudAccounts).limit(1).all();
+    const [existing] = db
+      .select()
+      .from(cloudAccounts)
+      .orderBy(desc(cloudAccounts.updatedAt))
+      .limit(1)
+      .all();
     if (!existing) throw error;
 
     const runId = randomUUID();

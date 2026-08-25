@@ -75,7 +75,15 @@ export function buildExport(options: BuildExportOptions = {}): DigitalOceanSecur
   const db = options.db ?? getDb();
   const now = options.now ?? (() => new Date());
 
-  const [account] = db.select().from(cloudAccounts).limit(1).all();
+  // Same ordering as getAccount(): export what the interface is showing. An
+  // unordered limit(1) returns whichever row was inserted first, so a database
+  // holding both a fixture and a live sync exports the wrong account.
+  const [account] = db
+    .select()
+    .from(cloudAccounts)
+    .orderBy(desc(cloudAccounts.updatedAt))
+    .limit(1)
+    .all();
   if (!account) throw new NoAccountError();
 
   const resourceRows = db
