@@ -31,4 +31,9 @@ export function getDb(): Database {
   return db;
 }
 
+/** Test seam: point the module-level queries at a temporary database. */
+export function setDbForTest(next: Database | undefined): void {
+  db = next;
+}
+
 export { schema };

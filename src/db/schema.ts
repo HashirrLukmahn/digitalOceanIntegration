@@ -216,3 +216,53 @@ export type SyncRunRow = typeof syncRuns.$inferSelect;
 export type CloudResourceRow = typeof cloudResources.$inferSelect;
 export type CloudRelationshipRow = typeof cloudRelationships.$inferSelect;
 export type ExposureFindingRow = typeof exposureFindings.$inferSelect;
+
+export const AGENT_OUTCOMES = ["completed", "incomplete", "failed"] as const;
+export type AgentOutcome = (typeof AGENT_OUTCOMES)[number];
+
+/** A chain the agent claims, spanning two or more resources. */
+export interface AgentFinding {
+  title: string;
+  severity: Severity;
+  resourceExternalIds: string[];
+  reasoning: string;
+  supportingFindingKinds: string[];
+}
+
+/**
+ * One row per agent run.
+ *
+ * `incomplete` is a first-class outcome, not an error: when the step cap fires before
+ * the agent calls its terminal tool there is no structured output at all, and the UI
+ * must say "analysis incomplete" rather than "no problems found". Those mean opposite
+ * things to a reader.
+ *
+ * One table, not three. `tool_calls_json` is enough to debug loop behaviour and
+ * attribute cost; a normalised step table would never be queried.
+ */
+export const agentRuns = sqliteTable(
+  "agent_runs",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => cloudAccounts.id, { onDelete: "cascade" }),
+    outcome: text("outcome", { enum: AGENT_OUTCOMES }).notNull(),
+    steps: integer("steps").notNull().default(0),
+    toolCallsJson: text("tool_calls_json", { mode: "json" })
+      .$type<Array<{ toolName: string; input: unknown }>>()
+      .notNull()
+      .default(sql`'[]'`),
+    findingsJson: text("findings_json", { mode: "json" })
+      .$type<AgentFinding[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    /** Sanitized. */
+    error: text("error"),
+    startedAt: ts("started_at").notNull(),
+    completedAt: ts("completed_at"),
+  },
+  (t) => [index("agent_runs_account_started_idx").on(t.accountId, t.startedAt)],
+);
+
+export type AgentRunRow = typeof agentRuns.$inferSelect;

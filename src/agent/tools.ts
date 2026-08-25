@@ -1,0 +1,155 @@
+import { tool, type Tool } from "ai";
+import { z } from "zod";
+import { getResourceEdges, listFindings, listResources } from "../data/queries";
+
+/**
+ * The agent's tools.
+ *
+ * All four read the stored snapshot. None can reach DigitalOcean, and none can write
+ * anything — which is what makes an agent run reproducible against the data it saw,
+ * and what makes a resource named `"ignore previous instructions"` a bad finding
+ * rather than a live API call.
+ *
+ * Each is a thin projection over a query function the UI already uses. The snapshot
+ * is normalised; there is nothing left to translate.
+ */
+
+export const SEVERITY = z.enum(["low", "medium", "high", "critical"]);
+
+export function buildTools(accountId: string): Record<string, Tool> {
+  return {
+    query_resources: tool({
+      description:
+        "List synced resources. Omit all filters to see the whole account. Returns " +
+        "external ids, type, region, whether the resource is internet-facing, its " +
+        "sensitivity, and allowlisted provider metadata.",
+      inputSchema: z.object({
+        resourceType: z
+          .string()
+          .optional()
+          .describe('e.g. "digitalocean.droplet", "digitalocean.database_cluster"'),
+        region: z.string().optional(),
+        exposure: z.enum(["exposed", "not_exposed"]).optional(),
+        sensitivity: z.enum(["none", "credential", "datastore"]).optional(),
+      }),
+      execute: async ({ resourceType, ...rest }) =>
+        listResources(accountId, { type: resourceType, ...rest }).map((r) => ({
+          externalId: r.externalId,
+          resourceType: r.resourceType,
+          name: r.name,
+          region: r.region,
+          isInternetExposed: r.isInternetExposed,
+          sensitivity: r.sensitivity,
+          tags: r.tagsJson,
+          metadata: r.metadataJson,
+        })),
+    }),
+
+    query_rule_findings: tool({
+      description:
+        "List findings already produced by the deterministic rule engine. These are " +
+        "the confirmed single-resource problems and are the usual starting points for " +
+        "a chain. Do not re-report them.",
+      inputSchema: z.object({
+        severity: SEVERITY.optional(),
+        kind: z.string().optional().describe('e.g. "droplet.public_ingress"'),
+      }),
+      execute: async (filters) =>
+        listFindings(accountId, filters).map((f) => ({
+          resourceExternalId: f.resourceExternalId,
+          kind: f.kind,
+          severity: f.severity,
+          title: f.title,
+          evidence: f.evidenceJson,
+        })),
+    }),
+
+    query_relationships: tool({
+      description:
+        "Edges into and out of one resource: what contains it, what is attached to " +
+        "it, what routes to it, what depends on it. This is how you traverse from an " +
+        "entry point to a target.",
+      inputSchema: z.object({
+        externalId: z.string().describe('e.g. "do:droplet:101"'),
+      }),
+      execute: async ({ externalId }) => {
+        const { outgoing, incoming } = getResourceEdges(accountId, externalId);
+        const shape = (e: (typeof outgoing)[number]) => ({
+          source: e.sourceExternalId,
+          target: e.targetExternalId,
+          relationship: e.relationship,
+          evidence: e.evidence,
+          metadata: e.metadataJson,
+        });
+        return { outgoing: outgoing.map(shape), incoming: incoming.map(shape) };
+      },
+    }),
+
+    /**
+     * Terminal. The loop stops on the *call*, so the return value is never read by the
+     * model — it exists so the SDK has something to record.
+     */
+    report_findings: tool({
+      description:
+        "Report your conclusions and finish. An empty array is a valid, complete " +
+        "result and is the correct answer for most accounts. Call this exactly once.",
+      inputSchema: z.object({
+        findings: z
+          .array(
+            z.object({
+              title: z.string().describe("One line, naming the path"),
+              severity: SEVERITY,
+              resourceExternalIds: z
+                .array(z.string())
+                .min(2)
+                .describe("Every resource in the chain. Two or more, or it is not a chain."),
+              reasoning: z
+                .string()
+                .describe("How an attacker gets from the entry point to the target"),
+              supportingFindingKinds: z
+                .array(z.string())
+                .describe("Rule findings this builds on, by kind"),
+            }),
+          )
+          .describe("Empty array if no multi-resource path exists."),
+      }),
+      execute: async (input) => input,
+    }),
+  };
+}
+
+/**
+ * Returns the prior result for a repeated identical call.
+ *
+ * Without this, a model that is unsure what to do next re-issues the same query and
+ * burns the step budget discovering the same data. The note tells it the repeat was
+ * noticed, which is what actually breaks the loop.
+ */
+export function withRepeatGuard(tools: Record<string, Tool>): Record<string, Tool> {
+  const seen = new Map<string, unknown>();
+
+  return Object.fromEntries(
+    Object.entries(tools).map(([name, definition]) => [
+      name,
+      {
+        ...definition,
+        execute: async (args: unknown, options: unknown) => {
+          const key = `${name}:${JSON.stringify(args)}`;
+          if (seen.has(key)) {
+            return {
+              note:
+                "You already made this exact call. Returning the previous result " +
+                "unchanged. Try different arguments, or call report_findings to finish.",
+              result: seen.get(key),
+            };
+          }
+          const result = await (
+            definition.execute as (a: unknown, o: unknown) => Promise<unknown>
+          )(args, options);
+          seen.set(key, result);
+          return result;
+        },
+      } as Tool,
+    ]),
+  );
+}

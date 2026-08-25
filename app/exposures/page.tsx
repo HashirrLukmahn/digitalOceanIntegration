@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { Coverage, Empty, Severity, Urn } from "../components";
 import { Evidence } from "../evidence";
+import { AgentSection } from "../agent-section";
+import { latestAgentRun } from "../../src/agent/run";
 import {
   counts,
   findingFacets,
@@ -33,6 +35,7 @@ export default async function ExposuresPage({
   }
 
   const run = getLatestRun(account.id);
+  const agentRun = latestAgentRun(account.id);
   const facets = findingFacets(account.id);
   const types = inventoryFacets(account.id).types;
   const summary = counts(account.id);
@@ -122,6 +125,22 @@ export default async function ExposuresPage({
       </div>
 
       {run && <Coverage coverage={run.coverageJson} />}
+
+      <AgentSection
+        latest={
+          agentRun
+            ? {
+                outcome: agentRun.outcome,
+                steps: agentRun.steps,
+                findings: agentRun.findingsJson,
+                error: agentRun.error,
+                startedAt: agentRun.startedAt,
+              }
+            : null
+        }
+      />
+
+      <h2 className="text-sm font-semibold">Rule-engine findings</h2>
 
       {findings.length === 0 ? (
         <Empty
