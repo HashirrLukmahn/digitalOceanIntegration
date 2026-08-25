@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { fetchTeam } from "../../../../src/do/collectors";
 import { createTransport } from "../../../../src/do/transport";
-import { dataSource, digitalOceanToken } from "../../../../src/lib/env";
+import { dataSource } from "../../../../src/lib/env";
+import { credentialSource, digitalOceanCredential } from "../../../../src/do/credential";
 import { sanitizeError, tokenFingerprint } from "../../../../src/lib/redact";
 
 export const runtime = "nodejs";
@@ -14,7 +15,7 @@ export const dynamic = "force-dynamic";
  * and never anything from which it could be reconstructed.
  */
 export async function GET() {
-  if (dataSource() === "live" && !digitalOceanToken()) {
+  if (dataSource() === "live" && !digitalOceanCredential()) {
     return NextResponse.json(
       {
         ok: false,
@@ -33,7 +34,8 @@ export async function GET() {
       team: team.name,
       externalId: team.externalId,
       mode: dataSource(),
-      tokenFingerprint: tokenFingerprint(digitalOceanToken()),
+      tokenFingerprint: tokenFingerprint(digitalOceanCredential()),
+      credentialSource: credentialSource(),
     });
   } catch (error) {
     return NextResponse.json({ ok: false, error: sanitizeError(error) }, { status: 502 });

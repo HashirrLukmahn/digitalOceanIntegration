@@ -12,27 +12,23 @@ export function dataSource(): DataSource {
   return process.env.DATA_SOURCE === "fixtures" ? "fixtures" : "live";
 }
 
-/** The raw token, or undefined. Callers must not log or persist the return value. */
-export function digitalOceanToken(): string | undefined {
+/**
+ * The token from the environment, if set.
+ *
+ * Deliberately knows nothing about the database: this module is imported by client
+ * components, so anything it touches ends up in the browser bundle. The "which
+ * credential should we actually use" question lives in src/do/credential.ts, which is
+ * server-only.
+ *
+ * Callers must not log or persist the return value.
+ */
+export function environmentToken(): string | undefined {
   const token = process.env.DIGITALOCEAN_TOKEN?.trim();
   return token && token.length > 0 ? token : undefined;
 }
 
-export class MissingTokenError extends Error {
-  constructor() {
-    super(
-      "DIGITALOCEAN_TOKEN is not set. Add a read-only (api:read) personal access token " +
-        "to .env, or run with DATA_SOURCE=fixtures to evaluate the app without one.",
-    );
-    this.name = "MissingTokenError";
-  }
-}
-
-export function requireDigitalOceanToken(): string {
-  const token = digitalOceanToken();
-  if (!token) throw new MissingTokenError();
-  return token;
-}
+/** Back-compat alias for call sites that only care about the environment. */
+export const digitalOceanToken = environmentToken;
 
 export function apiBaseUrl(): string {
   return process.env.DIGITALOCEAN_API_BASE ?? "https://api.digitalocean.com";

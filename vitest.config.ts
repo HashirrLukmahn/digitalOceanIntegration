@@ -1,4 +1,7 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
+
+const here = (relative: string) => fileURLToPath(new URL(relative, import.meta.url));
 
 export default defineConfig({
   test: {
@@ -6,6 +9,12 @@ export default defineConfig({
     environment: "node",
   },
   resolve: {
-    alias: { "@": new URL("./src/", import.meta.url).pathname },
+    alias: {
+      "@": here("./src/"),
+      // `server-only` throws unless resolved through Next's server condition. The
+      // guard exists to fail a client import at build time; under test there is no
+      // client, so stub it rather than drop the guard from the app.
+      "server-only": here("./tests/helpers/server-only-stub.ts"),
+    },
   },
 });

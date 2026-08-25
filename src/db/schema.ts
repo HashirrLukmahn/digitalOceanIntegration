@@ -293,3 +293,37 @@ export const chatThreads = sqliteTable(
 );
 
 export type ChatThreadRow = typeof chatThreads.$inferSelect;
+
+/**
+ * Single-use CSRF state for the authorization code flow.
+ *
+ * Only the hash is stored, so a leaked database cannot be replayed against an
+ * authorization still in flight.
+ */
+export const oauthStates = sqliteTable("oauth_states", {
+  stateHash: text("state_hash").primaryKey(),
+  redirectUri: text("redirect_uri").notNull(),
+  createdAt: ts("created_at").notNull(),
+  expiresAt: ts("expires_at").notNull(),
+  consumedAt: ts("consumed_at"),
+});
+
+/**
+ * The connected DigitalOcean account, when connected by OAuth.
+ *
+ * One row, pinned to a fixed id — this build is single-tenant, and a table that can
+ * only hold one row is clearer than a table that could hold many but never does.
+ */
+export const oauthConnection = sqliteTable("oauth_connection", {
+  id: text("id").primaryKey(),
+  accessTokenCt: text("access_token_ct").notNull(),
+  refreshTokenCt: text("refresh_token_ct"),
+  expiresAt: ts("expires_at"),
+  grantedScopes: text("granted_scopes").notNull().default(""),
+  teamName: text("team_name"),
+  teamUuid: text("team_uuid"),
+  createdAt: ts("created_at").notNull(),
+  updatedAt: ts("updated_at").notNull(),
+});
+
+export type OAuthConnectionRow = typeof oauthConnection.$inferSelect;

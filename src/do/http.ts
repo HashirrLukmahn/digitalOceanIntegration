@@ -1,4 +1,5 @@
-import { apiBaseUrl, requireDigitalOceanToken } from "../lib/env";
+import { apiBaseUrl } from "../lib/env";
+import { digitalOceanCredential } from "./credential";
 import { sanitizeError, scrubString } from "../lib/redact";
 
 /**
@@ -58,6 +59,16 @@ export interface LiveHttpOptions {
   fetchImpl?: typeof fetch;
 }
 
+function requireCredential(): string {
+  const token = digitalOceanCredential();
+  if (!token) {
+    throw new Error(
+      "No DigitalOcean credential. Connect with OAuth, or set DIGITALOCEAN_TOKEN in .env.",
+    );
+  }
+  return token;
+}
+
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
@@ -97,7 +108,7 @@ export class LiveDoHttp implements DoHttp {
         const response = await this.#fetch(url, {
           method: "GET",
           headers: {
-            authorization: `Bearer ${requireDigitalOceanToken()}`,
+            authorization: `Bearer ${requireCredential()}`,
             accept: "application/json",
             "user-agent": "do-cloud-security/1.0",
           },
