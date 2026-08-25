@@ -1,3 +1,4 @@
+import { requireConnection } from "../../src/connection/state";
 import { SyncButton } from "../actions";
 import { Empty, StatusPill, formatTime } from "../components";
 import { getAccount, listRuns } from "../../src/data/queries";
@@ -5,6 +6,8 @@ import { getAccount, listRuns } from "../../src/data/queries";
 export const dynamic = "force-dynamic";
 
 export default function SyncsPage() {
+  requireConnection();
+
   const account = getAccount();
   if (!account) {
     return <Empty title="Nothing has been synced yet" hint="Run a sync to create a history." />;

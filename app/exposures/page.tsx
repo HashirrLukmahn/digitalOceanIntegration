@@ -1,3 +1,4 @@
+import { requireConnection } from "../../src/connection/state";
 import Link from "next/link";
 import { Coverage, Empty, Severity, Urn } from "../components";
 import { Evidence } from "../evidence";
@@ -23,6 +24,8 @@ export default async function ExposuresPage({
 }: {
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
+  requireConnection();
+
   const params = await searchParams;
   const account = getAccount();
 

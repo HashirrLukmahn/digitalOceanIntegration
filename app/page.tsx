@@ -1,7 +1,7 @@
-import { redirect } from "next/navigation";
 import { Chat } from "./chat";
 import { agentApiKey } from "../src/agent/model";
 import { getAccount, getLatestRun } from "../src/data/queries";
+import { requireConnection } from "../src/connection/state";
 
 export const dynamic = "force-dynamic";
 
@@ -17,11 +17,9 @@ export const dynamic = "force-dynamic";
  * SQLite read, and middleware runs before that is available.
  */
 export default function Home() {
-  const account = getAccount();
-  if (!account) redirect("/connections?reason=not_connected");
-
-  const run = getLatestRun(account.id);
-  if (!run) redirect("/connections?reason=never_synced");
+  requireConnection();
+  const account = getAccount()!;
+  const run = getLatestRun(account.id)!;
 
   return (
     <>

@@ -1,3 +1,4 @@
+import { requireConnection } from "../../src/connection/state";
 import Link from "next/link";
 import { Empty, Exposed, Sensitivity, Urn } from "../components";
 import { label } from "../labels";
@@ -15,6 +16,8 @@ export default async function InventoryPage({
 }: {
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
+  requireConnection();
+
   const params = await searchParams;
   const account = getAccount();
 

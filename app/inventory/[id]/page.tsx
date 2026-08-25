@@ -1,3 +1,4 @@
+import { requireConnection } from "../../../src/connection/state";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Empty, Exposed, Field, Sensitivity, Severity, Urn } from "../../components";
@@ -22,6 +23,8 @@ const RELATIONSHIP_PHRASING: Record<string, { out: string; in: string }> = {
 };
 
 export default async function ResourcePage({ params }: { params: Promise<{ id: string }> }) {
+  requireConnection();
+
   const { id } = await params;
   const externalId = decodeURIComponent(id);
   const account = getAccount();
