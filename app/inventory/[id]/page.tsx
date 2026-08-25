@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Empty, Exposed, Field, Sensitivity, Severity, Urn } from "../../components";
 import { Evidence } from "../../evidence";
+import { RemediationBlock } from "../../remediation";
 import { label } from "../../labels";
 import {
   findingsForResource,
@@ -86,6 +87,11 @@ export default async function ResourcePage({ params }: { params: Promise<{ id: s
                 <div>
                   <div className="eyebrow mb-1.5">Remediation</div>
                   <p className="text-sm leading-relaxed">{finding.remediation}</p>
+                  <RemediationBlock
+                    kind={finding.kind}
+                    resourceExternalId={finding.resourceExternalId}
+                    evidence={finding.evidenceJson}
+                  />
                 </div>
               </div>
             </details>

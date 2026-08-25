@@ -30,6 +30,7 @@ export const metadata: Metadata = {
 };
 
 const NAV = [
+  { href: "/", label: "Assistant" },
   { href: "/exposures", label: "Exposures" },
   { href: "/inventory", label: "Inventory" },
   { href: "/syncs", label: "Syncs" },
@@ -46,7 +47,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ModeBanner />
         <header className="border-b border-rule bg-surface">
           <div className="mx-auto flex max-w-[1400px] flex-wrap items-center gap-x-8 gap-y-3 px-6 py-3">
-            <Link href="/exposures" className="flex items-baseline gap-2.5">
+            <Link href="/" className="flex items-baseline gap-2.5">
               <span className="text-[0.95rem] font-semibold tracking-tight">Exposure review</span>
               <span className="eyebrow">DigitalOcean</span>
             </Link>

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Coverage, Empty, Severity, Urn } from "../components";
 import { Evidence } from "../evidence";
+import { RemediationBlock } from "../remediation";
 import { AgentSection } from "../agent-section";
 import { latestAgentRun } from "../../src/agent/run";
 import {
@@ -176,6 +177,11 @@ export default async function ExposuresPage({
                   <div>
                     <div className="eyebrow mb-1.5">Remediation</div>
                     <p className="text-sm leading-relaxed text-ink">{finding.remediation}</p>
+                    <RemediationBlock
+                      kind={finding.kind}
+                      resourceExternalId={finding.resourceExternalId}
+                      evidence={finding.evidenceJson}
+                    />
                   </div>
 
                   <div>
