@@ -4,13 +4,35 @@ import { dataSource, digitalOceanToken } from "../../src/lib/env";
 
 export const dynamic = "force-dynamic";
 
-export default function ConnectionMethodPage() {
+const REDIRECT_REASONS: Record<string, string> = {
+  not_connected:
+    "No DigitalOcean account is connected yet. Verify a connection and run a sync — the " +
+    "assistant answers from the stored snapshot, so it needs one before it can say anything.",
+  never_synced:
+    "The connection works, but nothing has been synced. Run a sync to build the snapshot the " +
+    "assistant reads from.",
+};
+
+export default async function ConnectionMethodPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
+  const { reason } = await searchParams;
+  const explanation = reason ? REDIRECT_REASONS[reason] : undefined;
   const account = getAccount();
   const mode = dataSource();
   const hasToken = Boolean(digitalOceanToken());
 
   return (
     <div className="max-w-5xl space-y-8">
+      {explanation && (
+        <div className="panel border-dashed px-4 py-3">
+          <p className="text-sm font-medium text-ink">Connect before asking</p>
+          <p className="mt-0.5 text-sm text-muted">{explanation}</p>
+        </div>
+      )}
+
       <header className="max-w-2xl">
         <div className="eyebrow mb-2">Connection / Choose a method</div>
         <h1 className="text-2xl font-semibold tracking-tight">
@@ -130,6 +152,15 @@ export default function ConnectionMethodPage() {
             "No account has been synced yet."
           )}
         </p>
+
+        {account && (
+          <Link
+            href="/"
+            className="mt-3 inline-block text-sm font-medium text-accent hover:underline"
+          >
+            Open the assistant →
+          </Link>
+        )}
       </section>
     </div>
   );
