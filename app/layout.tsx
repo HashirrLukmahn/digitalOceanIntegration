@@ -3,7 +3,7 @@ import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
 import { getAccount, getLatestRun } from "../src/data/queries";
-import { timeAgo } from "./components";
+import { ModeBanner, timeAgo } from "./components";
 
 /**
  * IBM Plex, deliberately: it was drawn for technical products, and using its sans
@@ -43,6 +43,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${sans.variable} ${mono.variable}`}>
       <body className="min-h-screen">
+        <ModeBanner />
         <header className="border-b border-rule bg-surface">
           <div className="mx-auto flex max-w-[1400px] flex-wrap items-center gap-x-8 gap-y-3 px-6 py-3">
             <Link href="/exposures" className="flex items-baseline gap-2.5">

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { SyncCoverage } from "../src/db/schema";
+import { dataSource, digitalOceanToken } from "../src/lib/env";
 
 /**
  * Shared presentational pieces.
@@ -143,6 +144,50 @@ export function Coverage({ coverage }: { coverage: SyncCoverage }) {
       </p>
     </div>
   );
+}
+
+/**
+ * States, on every page, when the numbers on screen are not from a real account.
+ *
+ * This sits above the navigation rather than on the connection page, because the
+ * connection page is not where somebody forms a belief about their security posture
+ * -- the findings list is. A security tool that displays fabricated findings without
+ * saying so on the same screen is worse than one that displays nothing.
+ */
+export function ModeBanner() {
+  const mode = dataSource();
+
+  if (mode === "fixtures") {
+    return (
+      <div className="border-b border-dashed border-medium/50 bg-medium/5">
+        <div className="mx-auto flex max-w-[1400px] flex-wrap items-baseline gap-x-3 gap-y-1 px-6 py-2">
+          <span className="text-[0.8rem] font-semibold text-medium">Sample data</span>
+          <span className="text-[0.8rem] text-muted">
+            This is a built-in fixture account, not a real DigitalOcean team. Every resource and
+            finding below is invented so the app can be evaluated without a token.
+          </span>
+          <span className="ml-auto text-[0.78rem] text-faint">
+            Set <span className="font-mono">DATA_SOURCE=live</span> to scan a real account.
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!digitalOceanToken()) {
+    return (
+      <div className="border-b border-dashed border-critical/50 bg-critical/5">
+        <div className="mx-auto max-w-[1400px] px-6 py-2 text-[0.8rem] text-critical">
+          No DigitalOcean token is configured. Set{" "}
+          <span className="font-mono">DIGITALOCEAN_TOKEN</span> in{" "}
+          <span className="font-mono">.env</span>, or use{" "}
+          <span className="font-mono">DATA_SOURCE=fixtures</span> to explore with sample data.
+        </div>
+      </div>
+    );
+  }
+
+  return null;
 }
 
 export function timeAgo(date: Date | null): string {
