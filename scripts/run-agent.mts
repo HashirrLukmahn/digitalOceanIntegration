@@ -11,7 +11,15 @@ console.log("findings:", r.findings.length);
 for (const f of r.findings) {
   console.log("");
   console.log(`  [${f.severity}] ${f.title}`);
-  console.log(`   chain    : ${f.resourceExternalIds.join("  ->  ")}`);
-  console.log(`   builds on: ${f.supportingFindingKinds.join(", ") || "(none)"}`);
+  const chain = f.hops
+    .map((h, i) =>
+      i === 0
+        ? h.resourceExternalId
+        : `${h.viaDirection === "inbound" ? "<-" : "->"} ${h.viaRelationship} -> ${h.resourceExternalId}`,
+    )
+    .join("  ");
+  const buildsOn = f.hops.map((h) => h.findingKind).filter(Boolean);
+  console.log(`   chain    : ${chain}`);
+  console.log(`   builds on: ${buildsOn.join(", ") || "(none)"}`);
   console.log(`   reasoning: ${f.reasoning}`);
 }

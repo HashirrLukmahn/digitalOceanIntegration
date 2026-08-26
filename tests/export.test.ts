@@ -108,6 +108,16 @@ describe("export shape", () => {
       expect(["provider_reported", "derived"]).toContain(edge.evidence);
     }
   });
+
+  it("never emits the internal `trusts` edge in the frozen v1 export", async () => {
+    // The fixture account has a database with trusted sources, so trust edges exist in the
+    // relationships table -- but the v1 export must not carry them.
+    await runSync({ http: new FixtureDoHttp(), db });
+    const { relationships } = buildExport({ db });
+    // The exported relationship type cannot even name `trusts`; the cast keeps this as a
+    // runtime backstop against a future change that widens the export union by accident.
+    expect(relationships.some((e) => (e.relationship as string) === "trusts")).toBe(false);
+  });
 });
 
 describe("export content safety", () => {

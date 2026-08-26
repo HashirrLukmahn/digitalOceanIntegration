@@ -478,6 +478,8 @@ describe("fingerprint stability", () => {
     resourceExternalId: "do:droplet:1",
     kind: "droplet.public_ingress",
     severity: "high" as const,
+    confidence: "provider_reported" as const,
+    provesInternetExposure: true,
     title: "t",
     summary: "s",
     evidence: {},
@@ -542,5 +544,41 @@ describe("engine", () => {
       }),
     );
     expect(new Set(result.findings.map((f) => f.id)).size).toBe(result.findings.length);
+  });
+
+  /**
+   * Confidence and exposure are required axes, not optional ones. This asserts the
+   * invariant at runtime across a mix of rules -- the type system enforces it at
+   * compile time, and this catches a rule that satisfies the type with `undefined`
+   * smuggled through `as`.
+   */
+  it("gives every finding an explicit confidence and exposure verdict", () => {
+    const result = evaluateExposure(
+      ACCOUNT,
+      inventory({
+        droplets: [publicDroplet()],
+        databases: [{ id: "db-1", name: "pg", connection: { host: "h", port: 25060 } }],
+        databaseFirewalls: { "db-1": [] },
+        apps: [
+          {
+            id: "app-1",
+            live_url: "https://x.example",
+            spec: { name: "x", envs: [{ key: "STRIPE_API_KEY", type: "GENERAL" }] },
+          },
+        ],
+      }),
+    );
+
+    expect(result.findings.length).toBeGreaterThan(0);
+    for (const finding of result.findings) {
+      expect(typeof finding.confidence).toBe("string");
+      expect(typeof finding.provesInternetExposure).toBe("boolean");
+    }
+
+    // The plaintext-secret finding is a disclosure finding, not a reachability one, so it
+    // must not drag its app into the internet-exposed set.
+    const secretFinding = result.findings.find((f) => f.kind === "app.plaintext_secret_env");
+    expect(secretFinding?.provesInternetExposure).toBe(false);
+    expect(result.exposedResourceIds.has("do:app:app-1")).toBe(true); // from public_ingress, not the secret
   });
 });

@@ -82,6 +82,18 @@ export function emptyInventory(): RawInventory {
   };
 }
 
+/**
+ * What a collector reports back after a successful run.
+ *
+ * `coverageKeys` are granular authoritative keys *beyond* the collector name and its
+ * resource types -- the per-child keys a collector that does per-resource sub-fetches can
+ * vouch for, such as `database_firewall:<clusterId>`. A collector that fetches a single
+ * dataset returns nothing here; its name and resource types are key enough.
+ */
+export interface CollectorResult {
+  coverageKeys?: string[];
+}
+
 export interface Collector {
   name: string;
   /** Required collectors are the minimum viable inventory from the specification. */
@@ -95,7 +107,7 @@ export interface Collector {
    * optional collector would freeze deletion tracking for the entire inventory.
    */
   resourceTypes: readonly string[];
-  run(http: DoHttp, inventory: RawInventory): Promise<void>;
+  run(http: DoHttp, inventory: RawInventory): Promise<CollectorResult | void>;
 }
 
 /** Raised by a collector that cannot run at all, as opposed to one that errored. */
@@ -215,6 +227,12 @@ export const databasesCollector: Collector = {
 
     inventory.databases = databases;
     inventory.databaseFirewalls = firewalls;
+
+    // Per-child coverage: the loop above is all-or-nothing (it throws if any cluster's
+    // firewall fetch fails), so on success every cluster's trusted sources are
+    // authoritative. Reporting them as granular keys lets a finding or edge that depends on
+    // a specific cluster's firewall reconcile on that key rather than on the whole type.
+    return { coverageKeys: databases.map((cluster) => `database_firewall:${cluster.id}`) };
   },
 };
 

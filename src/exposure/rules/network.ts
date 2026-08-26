@@ -57,6 +57,7 @@ export const loadBalancerPublicRule: ExposureRule = {
         kind: "load_balancer.public_frontend",
         severity: derivation.final,
         confidence,
+        provesInternetExposure: true,
         title:
           sensitive.length > 0
             ? "Load balancer forwards a sensitive port from the internet"
@@ -136,6 +137,7 @@ export const kubernetesPublicEndpointRule: ExposureRule = {
         kind: "kubernetes.public_control_plane",
         severity: derivation.final,
         confidence: "provider_reported",
+        provesInternetExposure: true,
         title: "Kubernetes control plane is reachable from any address",
         summary:
           `Cluster "${cluster.name}" exposes its API server at ${cluster.endpoint}` +
@@ -188,6 +190,7 @@ export const appPublicIngressRule: ExposureRule = {
         kind: "app.public_ingress",
         severity: derivation.final,
         confidence: "provider_reported",
+        provesInternetExposure: true,
         title: "App Platform app is publicly reachable",
         summary:
           `App "${name}" serves traffic publicly at ${url}. This is the expected behaviour for ` +

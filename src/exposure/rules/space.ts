@@ -31,6 +31,7 @@ export const spacePublicReadRule: ExposureRule = {
         kind: "space.public_read",
         severity: derivation.final,
         confidence: "active_probe",
+        provesInternetExposure: true,
         title: "Spaces bucket is readable by anyone",
         summary:
           `Bucket "${probe.bucket.name}" in ${probe.bucket.region} returned its object listing ` +

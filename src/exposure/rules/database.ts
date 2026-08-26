@@ -41,6 +41,7 @@ export const databasePublicNoTrustedSourcesRule: ExposureRule = {
         kind: "database.public_no_trusted_sources",
         severity: derivation.final,
         confidence: "derived",
+        provesInternetExposure: true,
         title: "Managed database is reachable from the internet with no trusted sources",
         summary:
           `Database cluster "${cluster.name}" (${cluster.engine ?? "unknown engine"}) exposes a ` +
@@ -62,6 +63,10 @@ export const databasePublicNoTrustedSourcesRule: ExposureRule = {
           "Kubernetes clusters that need it, and connect over the private network endpoint " +
           "where possible.",
         stableElement: "public-endpoint-no-trusted-sources",
+        // Depends on both the cluster listing and this cluster's trusted-source fetch, so it
+        // reconciles only when both were authoritative -- an empty trusted-source list is
+        // only meaningful if the firewall call actually succeeded.
+        coverageKeys: ["databases", `database_firewall:${cluster.id}`],
       });
     }
 
@@ -94,6 +99,7 @@ export const databaseTrustedSourceIsPublicRule: ExposureRule = {
         kind: "database.trusted_source_is_public",
         severity: derivation.final,
         confidence: "provider_reported",
+        provesInternetExposure: true,
         title: "Managed database trusts the entire internet",
         summary:
           `Database cluster "${cluster.name}" has a trusted source of ` +
@@ -122,6 +128,7 @@ export const databaseTrustedSourceIsPublicRule: ExposureRule = {
           .map((r) => `${r.type}:${r.value}`)
           .sort()
           .join("|"),
+        coverageKeys: ["databases", `database_firewall:${cluster.id}`],
       });
     }
 

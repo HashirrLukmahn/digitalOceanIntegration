@@ -1,4 +1,5 @@
 import type { RawInventory } from "../do/collectors";
+import { isPublicInternetCidr } from "../exposure/ports";
 import { externalId } from "../normalize/resource";
 
 /**
@@ -14,7 +15,7 @@ import { externalId } from "../normalize/resource";
  *      two it is gets recorded in `evidence`, so a reader can weigh it.
  */
 
-export type RelationshipKind = "contains" | "attached_to" | "routes_to" | "depends_on";
+export type RelationshipKind = "contains" | "attached_to" | "routes_to" | "depends_on" | "trusts";
 export type EvidenceSource = "provider_reported" | "derived";
 
 export interface DerivedRelationship {
@@ -181,7 +182,126 @@ export function deriveRelationships(inventory: RawInventory): DerivedRelationshi
     }
   }
 
+  // --- Database trusts source ----------------------------------------------------
+  // Trusted sources are the ONE place the database's own firewall names other resources,
+  // so this is the edge the attack-path rules and the graph read as "a compromised
+  // workload can reach this datastore". Direction is truster -> trusted: the cluster is
+  // the source, the workload it admits is the target.
+  //
+  // Provenance splits cleanly. A droplet/k8s/app trusted source names a concrete resource
+  // id DigitalOcean returned verbatim -> provider_reported. A tag or an IP/CIDR has to be
+  // *resolved* to the concrete resources it currently matches, and that membership can
+  // change between syncs, so the resolution is an inference -> derived. The trust *form*
+  // and the raw matched value are recorded in `metadata`, never in the enum-valued
+  // `evidence` field.
+  //
+  // VPC membership is deliberately never a trust edge: DigitalOcean has no "vpc"
+  // trusted-source type, so claiming one would be unfalsifiable. An IP/CIDR that resolves
+  // to no collected resource yields no edge -- it is an external address with no node to
+  // point at, and a wide-open 0.0.0.0/0 is already reported as a finding.
+  const dropletV4 = inventory.droplets.map((droplet) => ({
+    externalId: externalId("droplet", droplet.id),
+    addresses: (droplet.networks?.v4 ?? [])
+      .map((n) => n.ip_address)
+      .filter((ip): ip is string => Boolean(ip)),
+  }));
+
+  for (const cluster of inventory.databases) {
+    const rules = inventory.databaseFirewalls[cluster.id];
+    if (rules === undefined) continue; // firewall fetch failed for this cluster; say nothing
+    const source = externalId("database", cluster.id);
+
+    for (const rule of rules) {
+      switch (rule.type) {
+        case "droplet":
+        case "k8s":
+        case "app": {
+          // A trusted source names a concrete resource id verbatim. `k8s` is DigitalOcean's
+          // trusted-source label for what we inventory as `kubernetes`.
+          const targetKey = rule.type === "k8s" ? "kubernetes" : rule.type;
+          const target = externalId(targetKey, rule.value);
+          if (!known.has(target)) continue;
+          edges.push({
+            sourceExternalId: source,
+            targetExternalId: target,
+            relationship: "trusts",
+            evidence: "provider_reported",
+            metadata: { via: "database_firewall.trusted_source", form: rule.type, value: rule.value },
+          });
+          break;
+        }
+        case "tag": {
+          // Any droplet carrying the tag is admitted. Resolution -> derived.
+          for (const droplet of inventory.droplets) {
+            if (!(droplet.tags ?? []).includes(rule.value)) continue;
+            edges.push({
+              sourceExternalId: source,
+              targetExternalId: externalId("droplet", droplet.id),
+              relationship: "trusts",
+              evidence: "derived",
+              metadata: { via: "database_firewall.trusted_source", form: "tag", value: rule.value },
+            });
+          }
+          break;
+        }
+        case "ip_addr": {
+          const value = rule.value.trim();
+          // A whole-internet source is a public-exposure finding, not a scoped trust edge;
+          // resolving it would falsely "trust" every droplet in the account.
+          if (isPublicInternetCidr(value)) break;
+          const isCidr = value.includes("/");
+          for (const droplet of dropletV4) {
+            const matched = droplet.addresses.some((addr) =>
+              isCidr ? ipv4InCidr(addr, value) : addr === value,
+            );
+            if (!matched) continue;
+            edges.push({
+              sourceExternalId: source,
+              targetExternalId: droplet.externalId,
+              relationship: "trusts",
+              evidence: "derived",
+              metadata: {
+                via: "database_firewall.trusted_source",
+                form: isCidr ? "cidr" : "ip",
+                value,
+              },
+            });
+          }
+          break;
+        }
+        default:
+          break; // unknown trusted-source type: record nothing rather than guess
+      }
+    }
+  }
+
   return dedupe(edges);
+}
+
+/** Parse a dotted-quad IPv4 address to an unsigned 32-bit integer, or null if malformed. */
+function ipv4ToInt(ip: string): number | null {
+  const parts = ip.trim().split(".");
+  if (parts.length !== 4) return null;
+  let n = 0;
+  for (const part of parts) {
+    const octet = Number(part);
+    if (!Number.isInteger(octet) || octet < 0 || octet > 255) return null;
+    n = (n << 8) | octet;
+  }
+  return n >>> 0;
+}
+
+/** Whether an IPv4 address falls inside an IPv4 CIDR block. IPv6 is not resolved. */
+function ipv4InCidr(ip: string, cidr: string): boolean {
+  const [base, bitsRaw] = cidr.split("/");
+  const bits = Number(bitsRaw);
+  if (!Number.isInteger(bits) || bits < 0 || bits > 32) return false;
+  const ipInt = ipv4ToInt(ip);
+  const baseInt = ipv4ToInt(base ?? "");
+  if (ipInt === null || baseInt === null) return false;
+  if (bits === 0) return true;
+  const mask = (0xffffffff << (32 - bits)) >>> 0;
+  return (ipInt & mask) === (baseInt & mask);
 }
 
 /**

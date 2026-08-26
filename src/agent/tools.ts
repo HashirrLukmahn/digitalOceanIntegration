@@ -151,16 +151,40 @@ export function buildTools(
             z.object({
               title: z.string().describe("One line, naming the path"),
               severity: SEVERITY,
-              resourceExternalIds: z
-                .array(z.string())
+              hops: z
+                .array(
+                  z.object({
+                    resourceExternalId: z
+                      .string()
+                      .describe('The resource reached at this step, e.g. "do:droplet:101"'),
+                    viaRelationship: z
+                      .enum(["contains", "attached_to", "routes_to", "depends_on", "trusts"])
+                      .optional()
+                      .describe(
+                        "The edge you followed to reach this resource, from query_relationships. " +
+                          "Omit on the first (entry) hop only.",
+                      ),
+                    viaDirection: z
+                      .enum(["outbound", "inbound"])
+                      .optional()
+                      .describe(
+                        "outbound = you followed the edge from its source to its target; " +
+                          "inbound = from its target back to its source. Omit on the entry hop.",
+                      ),
+                    findingKind: z
+                      .string()
+                      .optional()
+                      .describe('A rule finding at this resource, by kind, if any (e.g. "droplet.public_ingress")'),
+                  }),
+                )
                 .min(2)
-                .describe("Every resource in the chain. Two or more, or it is not a chain."),
+                .describe(
+                  "The ordered path, entry first. Two or more hops, or it is not a chain. " +
+                    "Every hop after the first must name the edge that reached it.",
+                ),
               reasoning: z
                 .string()
                 .describe("How an attacker gets from the entry point to the target"),
-              supportingFindingKinds: z
-                .array(z.string())
-                .describe("Rule findings this builds on, by kind"),
             }),
           )
           .describe("Empty array if no multi-resource path exists."),

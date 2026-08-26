@@ -18,7 +18,7 @@ import {
 } from "../src/do/collectors";
 import { FixtureDoHttp } from "../src/do/fixtures";
 import type { DoHttp, QueryParams } from "../src/do/http";
-import { runSync } from "../src/sync/run";
+import { isFindingResolvable, runSync } from "../src/sync/run";
 import { createTestDb, fixedClock } from "./helpers/db";
 
 let db: Database;
@@ -187,6 +187,17 @@ describe("sync against the fixture account", () => {
     expect(
       edges.some((e) => e.relationship === "attached_to" && e.sourceExternalId === "do:volume:vol-data-1"),
     ).toBe(true);
+
+    // The `trusts` edge round-trips through the database: db-orders names droplet 101 as a
+    // trusted source, so a provider-reported trust edge is persisted (and the enum accepts it).
+    const trust = edges.find(
+      (e) =>
+        e.relationship === "trusts" &&
+        e.sourceExternalId === "do:dbaas:db-orders" &&
+        e.targetExternalId === "do:droplet:101",
+    );
+    expect(trust?.evidence).toBe("provider_reported");
+    expect((trust?.metadataJson as { form?: string })?.form).toBe("droplet");
   });
 
   it("stores no credential anywhere in the database", async () => {
@@ -472,5 +483,58 @@ describe("sync run bookkeeping", () => {
     const clock = fixedClock();
     await runSync({ http: new FixtureDoHttp(), db, now: clock.now });
     expect(rows.accounts()[0]!.lastSyncedAt).not.toBeNull();
+  });
+});
+
+describe("coverage keys", () => {
+  it("records granular authoritative keys, including per-cluster firewall child keys", async () => {
+    const result = await runSync({ http: new FixtureDoHttp(), db });
+    const keys = result.coverage.authoritativeKeys ?? [];
+
+    // Collector name, resource type, and the per-child key for a specific cluster.
+    expect(keys).toContain("databases");
+    expect(keys).toContain("digitalocean.database_cluster");
+    expect(keys).toContain("database_firewall:db-orders");
+  });
+
+  it("persists the coverage keys a database finding depended on", async () => {
+    await runSync({ http: new FixtureDoHttp(), db });
+    // db-analytics trusts 0.0.0.0/0 -> a public-trusted-source finding is produced.
+    const finding = rows
+      .findings()
+      .find((f) => f.resourceExternalId === "do:dbaas:db-analytics");
+    expect(finding).toBeDefined();
+    expect(finding!.coverageKeysJson).toEqual(["databases", "database_firewall:db-analytics"]);
+  });
+});
+
+/**
+ * The resolution predicate is where the producer contract earns its keep, so it is tested
+ * directly: a finding that names several datasets must not be marked resolved just because
+ * one of them (its own resource type) came back.
+ */
+describe("isFindingResolvable", () => {
+  const types = new Set(["digitalocean.database_cluster", "digitalocean.droplet"]);
+
+  it("falls back to resource type when a finding records no coverage keys", () => {
+    expect(isFindingResolvable([], "do:dbaas:db-1", new Set(), types)).toBe(true);
+    expect(isFindingResolvable([], "do:space:b", new Set(), types)).toBe(false);
+  });
+
+  it("resolves a keyed finding only when every key is authoritative", () => {
+    const authoritative = new Set(["databases", "database_firewall:db-1"]);
+    expect(
+      isFindingResolvable(["databases", "database_firewall:db-1"], "do:dbaas:db-1", authoritative, types),
+    ).toBe(true);
+  });
+
+  it("keeps a keyed finding open when one of its datasets failed, even if its type came back", () => {
+    // A cross-collector finding: its resource type (database) is authoritative, but the
+    // firewalls dataset it also depended on is not. Type-based reconciliation would wrongly
+    // resolve it; key-based reconciliation correctly does not.
+    const authoritative = new Set(["databases", "digitalocean.database_cluster"]);
+    expect(
+      isFindingResolvable(["databases", "firewalls"], "do:dbaas:db-1", authoritative, types),
+    ).toBe(false);
   });
 });

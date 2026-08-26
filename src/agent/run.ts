@@ -3,6 +3,7 @@ import { ToolLoopAgent, hasToolCall, isStepCount, type LanguageModel } from "ai"
 import { desc, eq } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { agentRuns, type AgentFinding, type AgentOutcome } from "../db/schema";
+import { getResourceEdges } from "../data/queries";
 import { sanitizeError } from "../lib/redact";
 import { logger } from "../lib/logger";
 import { agentModel } from "./model";
@@ -118,11 +119,17 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentRunResult
       );
     }
 
-    const findings = ((report.input as { findings?: AgentFinding[] }).findings ?? []).filter(
-      // A "chain" of one resource is a rule finding restated. Drop it rather than
-      // letting the agent take credit for work the rule engine already did.
-      (finding) => finding.resourceExternalIds.length >= 2,
-    );
+    const proposed = (report.input as { findings?: AgentFinding[] }).findings ?? [];
+    const findings = proposed.filter((finding) => isGrounded(accountId, finding));
+
+    if (findings.length < proposed.length) {
+      // Ungrounded findings are the model's hallucinations: a chain of one, a hop whose
+      // edge the stored graph does not contain, or an edge claimed in the wrong direction.
+      logger.info("Dropped ungrounded agent findings", {
+        runId,
+        dropped: proposed.length - findings.length,
+      });
+    }
 
     logger.info("Agent completed", { runId, steps: result.steps.length, findings: findings.length });
     return persist(
@@ -134,6 +141,42 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentRunResult
     logger.error("Agent run failed", { runId, error: message });
     return persist({ outcome: "failed", findings: [], steps: 0, error: message }, []);
   }
+}
+
+/**
+ * Whether every hop of a claimed path is real.
+ *
+ * A chain of fewer than two hops is a rule finding restated. Beyond that, each hop after
+ * the entry must name the edge that reached it, and that edge must exist in the stored
+ * graph in the stated direction. This is the anti-hallucination gate: the model can only
+ * report a path the deterministic relationship data already contains, so a named-but-
+ * unrelated pair of resources, or a real edge cited backwards, is dropped rather than shown.
+ */
+export function isGrounded(accountId: string, finding: AgentFinding): boolean {
+  const hops = finding.hops ?? [];
+  if (hops.length < 2) return false;
+
+  for (let i = 1; i < hops.length; i++) {
+    const hop = hops[i]!;
+    const prev = hops[i - 1]!;
+    if (!hop.viaRelationship || !hop.viaDirection) return false;
+
+    const { outgoing, incoming } = getResourceEdges(accountId, hop.resourceExternalId);
+    const grounded =
+      hop.viaDirection === "outbound"
+        ? // prev -> hop: the stored edge has source = prev, target = hop.
+          incoming.some(
+            (e) => e.sourceExternalId === prev.resourceExternalId && e.relationship === hop.viaRelationship,
+          )
+        : // inbound, hop -> prev: the stored edge has source = hop, target = prev.
+          outgoing.some(
+            (e) => e.targetExternalId === prev.resourceExternalId && e.relationship === hop.viaRelationship,
+          );
+
+    if (!grounded) return false;
+  }
+
+  return true;
 }
 
 export function latestAgentRun(accountId: string) {

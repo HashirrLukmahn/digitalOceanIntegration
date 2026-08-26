@@ -147,13 +147,21 @@ export function buildExport(options: BuildExportOptions = {}): DigitalOceanSecur
       tags: row.tagsJson,
       metadata: row.metadataJson,
     })),
-    relationships: relationshipRows.map((row) => ({
-      sourceExternalId: row.sourceExternalId,
-      targetExternalId: row.targetExternalId,
-      relationship: row.relationship,
-      evidence: row.evidence,
-      metadata: row.metadataJson,
-    })),
+    // `trusts` is an internal-only relationship kind: it is stored and traversed, but the
+    // frozen v1 export never carries it, and its relationship union stays the four public
+    // values. Filtering here (rather than at the query) keeps the snapshot and graph, which
+    // read the same table directly, able to see trust edges.
+    relationships: relationshipRows
+      .filter((row): row is typeof row & { relationship: ExportedRelationship["relationship"] } =>
+        row.relationship !== "trusts",
+      )
+      .map((row) => ({
+        sourceExternalId: row.sourceExternalId,
+        targetExternalId: row.targetExternalId,
+        relationship: row.relationship,
+        evidence: row.evidence,
+        metadata: row.metadataJson,
+      })),
     findings: findingRows.map((row) => ({
       fingerprint: row.id,
       resourceExternalId: row.resourceExternalId,

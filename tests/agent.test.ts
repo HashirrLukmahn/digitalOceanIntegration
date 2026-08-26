@@ -52,13 +52,17 @@ const modelCalling = (toolName: string, input: unknown) =>
 const runs = () => db.select().from(agentRuns).all();
 
 describe("terminal tool", () => {
-  it("completes when report_findings is called, and keeps the chain", async () => {
+  it("completes when report_findings is called, and keeps a grounded chain", async () => {
+    // The fixture graph has db-orders trusting droplet 101 (source=db-orders, target=101),
+    // so travelling 101 -> db-orders is an *inbound* traversal of that trust edge.
     const chain = {
       title: "Public droplet reaches the orders database",
       severity: "high",
-      resourceExternalIds: ["do:droplet:101", "do:dbaas:db-orders"],
+      hops: [
+        { resourceExternalId: "do:droplet:101", findingKind: "droplet.public_ingress" },
+        { resourceExternalId: "do:dbaas:db-orders", viaRelationship: "trusts", viaDirection: "inbound" },
+      ],
       reasoning: "web-01 is internet-facing and the database trusts it as a source.",
-      supportingFindingKinds: ["droplet.public_ingress"],
     };
 
     const result = await runAgent({
@@ -69,6 +73,7 @@ describe("terminal tool", () => {
     expect(result.outcome).toBe("completed");
     expect(result.findings).toHaveLength(1);
     expect(result.findings[0]!.title).toBe(chain.title);
+    expect(result.findings[0]!.hops).toHaveLength(2);
   });
 
   it("treats an empty report as a complete, successful run", async () => {
@@ -83,7 +88,7 @@ describe("terminal tool", () => {
     expect(result.findings).toEqual([]);
   });
 
-  it("drops a single-resource finding as a restated rule finding", async () => {
+  it("drops a single-hop finding as a restated rule finding", async () => {
     const result = await runAgent({
       accountId,
       model: modelCalling("report_findings", {
@@ -91,15 +96,61 @@ describe("terminal tool", () => {
           {
             title: "Droplet has SSH open",
             severity: "high",
-            resourceExternalIds: ["do:droplet:101"],
+            hops: [{ resourceExternalId: "do:droplet:101", findingKind: "droplet.public_ingress" }],
             reasoning: "restating the rule engine",
-            supportingFindingKinds: [],
           },
         ],
       }),
     });
 
     expect(result.outcome).toBe("completed");
+    expect(result.findings).toEqual([]);
+  });
+
+  it("drops a chain whose hop edge is not in the graph (hallucinated pivot)", async () => {
+    // droplet 101 and droplet 104 are both real, but nothing in the graph is a `trusts`
+    // edge between them, so the claimed hop cannot be grounded.
+    const result = await runAgent({
+      accountId,
+      model: modelCalling("report_findings", {
+        findings: [
+          {
+            title: "Fabricated pivot between two droplets",
+            severity: "high",
+            hops: [
+              { resourceExternalId: "do:droplet:101" },
+              { resourceExternalId: "do:droplet:104", viaRelationship: "trusts", viaDirection: "outbound" },
+            ],
+            reasoning: "asserts an edge the stored graph does not contain",
+          },
+        ],
+      }),
+    });
+
+    expect(result.outcome).toBe("completed");
+    expect(result.findings).toEqual([]);
+  });
+
+  it("drops a chain that cites a real edge in the wrong direction", async () => {
+    // db-orders trusts droplet 101, so 101 -> db-orders is *inbound*. Claiming *outbound*
+    // (as if droplet 101 were the truster) names a real edge backwards and must not ground.
+    const result = await runAgent({
+      accountId,
+      model: modelCalling("report_findings", {
+        findings: [
+          {
+            title: "Trust edge cited backwards",
+            severity: "high",
+            hops: [
+              { resourceExternalId: "do:droplet:101" },
+              { resourceExternalId: "do:dbaas:db-orders", viaRelationship: "trusts", viaDirection: "outbound" },
+            ],
+            reasoning: "right resources, wrong direction",
+          },
+        ],
+      }),
+    });
+
     expect(result.findings).toEqual([]);
   });
 });

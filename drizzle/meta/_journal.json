@@ -29,6 +29,20 @@
       "when": 1787697040876,
       "tag": "0003_oauth",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1787784060828,
+      "tag": "0004_fantastic_the_hunter",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1787784416853,
+      "tag": "0005_bored_loki",
+      "breakpoints": true
     }
   ]
 }

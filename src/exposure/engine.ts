@@ -69,10 +69,11 @@ export function evaluateExposure(
 
   return {
     findings,
-    // Only reachability findings mark a resource as internet-exposed.
+    // Only reachability findings mark a resource as internet-exposed. Every finding now
+    // states this explicitly, so there is no default to reason about here.
     exposedResourceIds: new Set(
       findings
-        .filter((f) => f.provesInternetExposure !== false)
+        .filter((f) => f.provesInternetExposure)
         .map((f) => f.resourceExternalId),
     ),
   };

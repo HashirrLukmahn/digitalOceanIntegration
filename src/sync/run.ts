@@ -6,10 +6,12 @@ import {
   cloudRelationships,
   cloudResources,
   exposureFindings,
+  snapshots,
   syncRuns,
   type SyncCoverage,
   type SyncStatus,
 } from "../db/schema";
+import { assembleSnapshotDocument, SNAPSHOT_VERSION } from "../snapshot/document";
 import {
   COLLECTORS,
   CollectorUnavailableError,
@@ -117,12 +119,21 @@ export async function runSync(options: SyncOptions): Promise<SyncResult> {
   const inventory: RawInventory = emptyInventory();
   const coverage = emptyCoverage();
   const authoritativeTypes = new Set<string>();
+  const authoritativeKeys = new Set<string>();
 
   for (const collector of collectors) {
     try {
-      await collector.run(options.http, inventory);
+      const result = await collector.run(options.http, inventory);
       coverage.completedCollectors.push(collector.name);
-      for (const type of collector.resourceTypes) authoritativeTypes.add(type);
+      // Granular coverage keys: the collector name, its resource types, and any per-child
+      // keys it reported (e.g. `database_firewall:<clusterId>`). A finding or edge records
+      // the subset it read and reconciles only when every one of its keys is here.
+      authoritativeKeys.add(collector.name);
+      for (const type of collector.resourceTypes) {
+        authoritativeTypes.add(type);
+        authoritativeKeys.add(type);
+      }
+      for (const key of result?.coverageKeys ?? []) authoritativeKeys.add(key);
     } catch (error) {
       const message = sanitizeError(error);
       if (error instanceof CollectorUnavailableError) {
@@ -142,6 +153,8 @@ export async function runSync(options: SyncOptions): Promise<SyncResult> {
     };
   }
 
+  coverage.authoritativeKeys = [...authoritativeKeys].sort();
+
   // --- 3. Normalize, relate, evaluate --------------------------------------------
   const resources = normalizeInventory(inventory);
   const relationships = deriveRelationships(inventory);
@@ -153,6 +166,9 @@ export async function runSync(options: SyncOptions): Promise<SyncResult> {
 
   // --- 4. Persist ----------------------------------------------------------------
   const seenAt = now();
+  // Computed here rather than after the transaction so the same status stamps both the
+  // run row and the snapshot document written inside it. It depends only on coverage.
+  const status = determineStatus(coverage, collectors.length);
 
   db.transaction((tx) => {
     for (const resource of resources) {
@@ -255,6 +271,7 @@ export async function runSync(options: SyncOptions): Promise<SyncResult> {
           title: finding.title,
           summary: finding.summary,
           evidenceJson: finding.evidence,
+          coverageKeysJson: finding.coverageKeys ?? [],
           remediation: finding.remediation,
           firstSeenAt: seenAt,
           lastSeenAt: seenAt,
@@ -267,6 +284,7 @@ export async function runSync(options: SyncOptions): Promise<SyncResult> {
             title: finding.title,
             summary: finding.summary,
             evidenceJson: finding.evidence,
+            coverageKeysJson: finding.coverageKeys ?? [],
             remediation: finding.remediation,
             lastSeenAt: seenAt,
             // A finding observed again has not been resolved.
@@ -292,10 +310,16 @@ export async function runSync(options: SyncOptions): Promise<SyncResult> {
         )
         .run();
 
-      // Findings have no resource type of their own, so it is recovered from the
-      // external id -- `do:dbaas:x` belongs to the database collector.
+      // A finding is resolvable when the data that would re-derive it was authoritative
+      // this run yet the finding did not reappear. Findings that recorded `coverage_keys`
+      // reconcile on those exact keys; the rest fall back to recovering a resource type
+      // from the external id -- `do:dbaas:x` belongs to the database collector.
       const openFindings = tx
-        .select({ id: exposureFindings.id, resource: exposureFindings.resourceExternalId })
+        .select({
+          id: exposureFindings.id,
+          resource: exposureFindings.resourceExternalId,
+          coverageKeys: exposureFindings.coverageKeysJson,
+        })
         .from(exposureFindings)
         .where(
           and(
@@ -307,10 +331,9 @@ export async function runSync(options: SyncOptions): Promise<SyncResult> {
         .all();
 
       const resolvableIds = openFindings
-        .filter((row) => {
-          const type = resourceTypeFromExternalId(row.resource);
-          return type !== null && authoritativeTypes.has(type);
-        })
+        .filter((row) =>
+          isFindingResolvable(row.coverageKeys, row.resource, authoritativeKeys, authoritativeTypes),
+        )
         .map((row) => row.id);
 
       if (resolvableIds.length > 0) {
@@ -320,10 +343,83 @@ export async function runSync(options: SyncOptions): Promise<SyncResult> {
           .run();
       }
     }
+
+    // --- 5b. Snapshot the post-reconciliation account view -----------------------
+    // Read current state back *inside this transaction*, after every write and the
+    // reconciliation above, so the snapshot is the merged view a partial run leaves
+    // behind and can never disagree with the rows it describes. Retained rows (from a
+    // failed collector) survive with removed_at / resolved_at still null.
+    const snapshotResources = tx
+      .select()
+      .from(cloudResources)
+      .where(and(eq(cloudResources.accountId, accountId), isNull(cloudResources.removedAt)))
+      .all();
+    const snapshotEdges = tx
+      .select()
+      .from(cloudRelationships)
+      .where(eq(cloudRelationships.accountId, accountId))
+      .all();
+    const snapshotFindings = tx
+      .select()
+      .from(exposureFindings)
+      .where(and(eq(exposureFindings.accountId, accountId), isNull(exposureFindings.resolvedAt)))
+      .all();
+
+    const document = assembleSnapshotDocument({
+      syncRunId: runId,
+      status,
+      coverage,
+      seenAt,
+      generatedAt: seenAt.toISOString(),
+      authoritativeKeys,
+      resources: snapshotResources.map((row) => ({
+        provider: "digitalocean" as const,
+        externalId: row.externalId,
+        resourceType: row.resourceType,
+        name: row.name,
+        region: row.region,
+        state: row.state,
+        isInternetExposed: row.isInternetExposed,
+        sensitivity: row.sensitivity,
+        tags: row.tagsJson,
+        metadata: row.metadataJson,
+        lastSeenAt: row.lastSeenAt,
+      })),
+      relationships: snapshotEdges.map((row) => ({
+        sourceExternalId: row.sourceExternalId,
+        targetExternalId: row.targetExternalId,
+        relationship: row.relationship,
+        evidence: row.evidence,
+        metadata: row.metadataJson,
+      })),
+      findings: snapshotFindings.map((row) => ({
+        fingerprint: row.id,
+        resourceExternalId: row.resourceExternalId,
+        kind: row.kind,
+        severity: row.severity,
+        title: row.title,
+        summary: row.summary,
+        evidence: row.evidenceJson,
+        remediation: row.remediation,
+        lastSeenAt: row.lastSeenAt,
+        coverageKeys: row.coverageKeysJson,
+      })),
+    });
+
+    tx.insert(snapshots)
+      .values({
+        id: randomUUID(),
+        accountId,
+        syncRunId: runId,
+        snapshotVersion: SNAPSHOT_VERSION,
+        status,
+        documentJson: document,
+        createdAt: seenAt,
+      })
+      .run();
   });
 
   // --- 6. Close out the run ------------------------------------------------------
-  const status = determineStatus(coverage, collectors.length);
   const completedAt = now();
 
   db.update(syncRuns)
@@ -365,6 +461,29 @@ export async function runSync(options: SyncOptions): Promise<SyncResult> {
 
 function emptyCoverage(): SyncCoverage {
   return { completedCollectors: [], failedCollectors: [], unavailableCollectors: [] };
+}
+
+/**
+ * Whether an open finding should be marked resolved this run.
+ *
+ * A finding that recorded granular `coverageKeys` reconciles solely on them: every key it
+ * depended on must have been authoritative this run, so a path finding that read
+ * `firewalls` is not resolved merely because its resource type came back if the firewalls
+ * collector failed. A finding with no keys keeps the coarser, resource-type behaviour.
+ *
+ * Pure and exported so the decision can be tested in isolation from the sync transaction.
+ */
+export function isFindingResolvable(
+  coverageKeys: readonly string[],
+  resourceExternalId: string,
+  authoritativeKeys: ReadonlySet<string>,
+  authoritativeTypes: ReadonlySet<string>,
+): boolean {
+  if (coverageKeys.length > 0) {
+    return coverageKeys.every((key) => authoritativeKeys.has(key));
+  }
+  const type = resourceTypeFromExternalId(resourceExternalId);
+  return type !== null && authoritativeTypes.has(type);
 }
 
 /**

@@ -1,0 +1,1 @@
+ALTER TABLE `exposure_findings` ADD `coverage_keys_json` text DEFAULT '[]' NOT NULL;

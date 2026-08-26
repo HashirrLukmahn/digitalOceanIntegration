@@ -122,26 +122,26 @@ export function AgentSection({ latest }: Props) {
               </div>
 
               <div>
-                <div className="eyebrow mb-1.5">Resources in the chain</div>
-                <div className="flex flex-wrap gap-x-4 gap-y-1">
-                  {finding.resourceExternalIds.map((id) => (
-                    <Urn key={id} id={id} href={`/inventory/${encodeURIComponent(id)}`} />
+                <div className="eyebrow mb-1.5">Path</div>
+                <div className="flex flex-col gap-1.5">
+                  {finding.hops.map((hop, hopIndex) => (
+                    <div key={hop.resourceExternalId} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      {hopIndex > 0 && hop.viaRelationship && (
+                        <span className="font-mono text-[0.68rem] text-faint">
+                          └ {hop.viaDirection === "inbound" ? "←" : "→"} {hop.viaRelationship} →
+                        </span>
+                      )}
+                      <Urn
+                        id={hop.resourceExternalId}
+                        href={`/inventory/${encodeURIComponent(hop.resourceExternalId)}`}
+                      />
+                      {hop.findingKind && (
+                        <span className="font-mono text-[0.68rem] text-muted">({hop.findingKind})</span>
+                      )}
+                    </div>
                   ))}
                 </div>
               </div>
-
-              {finding.supportingFindingKinds.length > 0 && (
-                <div>
-                  <div className="eyebrow mb-1.5">Builds on these rule findings</div>
-                  <div className="flex flex-wrap gap-2">
-                    {finding.supportingFindingKinds.map((kind) => (
-                      <span key={kind} className="font-mono text-[0.72rem] text-muted">
-                        {kind}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           </details>
         ))}

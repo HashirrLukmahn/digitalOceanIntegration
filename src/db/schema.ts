@@ -6,6 +6,7 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import type { SnapshotDocument } from "../snapshot/document";
 
 /**
  * Local SQLite schema.
@@ -57,6 +58,17 @@ export interface SyncCoverage {
   completedCollectors: string[];
   failedCollectors: Array<{ collector: string; message: string }>;
   unavailableCollectors: Array<{ collector: string; message: string }>;
+  /**
+   * Granular coverage keys this run was authoritative for -- the producer contract.
+   *
+   * A collector name is the whole-dataset key; a collector that does per-child work also
+   * reports child keys like `database_firewall:<clusterId>` as each child call succeeds.
+   * A finding records the subset it read as its `coverage_keys`, and reconciliation
+   * resolves that finding only when every one of its keys is present here. This is finer
+   * than the type-based reconciliation: a path finding that read `firewalls` is not
+   * resolved just because its resource type came back, if the firewalls collector failed.
+   */
+  authoritativeKeys?: string[];
   /**
    * Which Spaces capability was available, when it ran at all.
    *
@@ -137,8 +149,24 @@ export const cloudResources = sqliteTable(
   ],
 );
 
-export const RELATIONSHIPS = ["contains", "attached_to", "routes_to", "depends_on"] as const;
+/**
+ * `trusts` is an internal-only relationship kind (see the canonical spec's "Internal
+ * schema extensions"). It is stored and traversed like any other edge, but the frozen v1
+ * JSON export never emits it -- `buildExport` filters it out, and the exported relationship
+ * union stays the four public values. Adding it here rather than in the export type is what
+ * keeps that distinction enforced by the compiler.
+ */
+export const RELATIONSHIPS = ["contains", "attached_to", "routes_to", "depends_on", "trusts"] as const;
 export type RelationshipKind = (typeof RELATIONSHIPS)[number];
+
+/** The subset of relationship kinds carried by the frozen v1 export. `trusts` is excluded. */
+export const EXPORTED_RELATIONSHIPS = [
+  "contains",
+  "attached_to",
+  "routes_to",
+  "depends_on",
+] as const;
+export type ExportedRelationshipKind = (typeof EXPORTED_RELATIONSHIPS)[number];
 
 export const EVIDENCE_SOURCES = ["provider_reported", "derived"] as const;
 export type EvidenceSource = (typeof EVIDENCE_SOURCES)[number];
@@ -199,6 +227,18 @@ export const exposureFindings = sqliteTable(
       .$type<Record<string, unknown>>()
       .notNull()
       .default(sql`'{}'`),
+    /**
+     * The granular collector coverage keys this finding's derivation depended on.
+     *
+     * Internal only -- the frozen v1 export omits it. When non-empty, reconciliation
+     * resolves this finding solely on these keys (every one must be authoritative),
+     * replacing the coarser resource-type check for findings that set it. Empty means the
+     * finding opts out and keeps type-based reconciliation.
+     */
+    coverageKeysJson: text("coverage_keys_json", { mode: "json" })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
     remediation: text("remediation").notNull(),
     firstSeenAt: ts("first_seen_at").notNull(),
     lastSeenAt: ts("last_seen_at").notNull(),
@@ -211,22 +251,77 @@ export const exposureFindings = sqliteTable(
   ],
 );
 
+/**
+ * One append-only snapshot document per sync run.
+ *
+ * Internal only -- it is not part of the frozen v1 export. It stores the
+ * post-reconciliation account view (resources, relationships including `trusts`, findings,
+ * and coverage, each item tagged observed-vs-retained) as an immutable evaluated-output
+ * document. Written in the same transaction that updates current state, so it can never
+ * disagree with the rows it describes. See src/snapshot/document.ts.
+ */
+export const snapshots = sqliteTable(
+  "snapshots",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => cloudAccounts.id, { onDelete: "cascade" }),
+    syncRunId: text("sync_run_id")
+      .notNull()
+      .references(() => syncRuns.id, { onDelete: "cascade" }),
+    /** Distinct from the export `schemaVersion`, so the stored shape can evolve freely. */
+    snapshotVersion: text("snapshot_version").notNull(),
+    status: text("status", { enum: SYNC_STATUSES }).notNull(),
+    documentJson: text("document_json", { mode: "json" })
+      .$type<SnapshotDocument>()
+      .notNull(),
+    createdAt: ts("created_at").notNull(),
+  },
+  (t) => [index("snapshots_account_created_idx").on(t.accountId, t.createdAt)],
+);
+
 export type CloudAccountRow = typeof cloudAccounts.$inferSelect;
 export type SyncRunRow = typeof syncRuns.$inferSelect;
 export type CloudResourceRow = typeof cloudResources.$inferSelect;
 export type CloudRelationshipRow = typeof cloudRelationships.$inferSelect;
 export type ExposureFindingRow = typeof exposureFindings.$inferSelect;
+export type SnapshotRow = typeof snapshots.$inferSelect;
 
 export const AGENT_OUTCOMES = ["completed", "incomplete", "failed"] as const;
 export type AgentOutcome = (typeof AGENT_OUTCOMES)[number];
+
+/**
+ * One node in an agent's claimed path, together with the edge that reached it.
+ *
+ * A bare list of resource ids proves which *nodes* the agent touched but not which
+ * *edge* it claims to have traversed between them, so a path could name two real
+ * resources with no relationship between them and read as sound. Each hop therefore
+ * carries the incoming edge, which is simultaneously the citation the grounding
+ * validator checks against the stored graph.
+ */
+export interface AgentHop {
+  /** The node reached at this hop. */
+  resourceExternalId: string;
+  /** Edge traversed to reach it. Absent on the entry hop, which has no incoming edge. */
+  viaRelationship?: RelationshipKind;
+  /**
+   * Orientation of the stored (source -> target) edge relative to travel.
+   * `outbound`: the previous node is the edge's source and this node its target.
+   * `inbound`: the previous node is the edge's target and this node its source.
+   */
+  viaDirection?: "outbound" | "inbound";
+  /** A supporting rule finding at this node, by kind, if the hop builds on one. */
+  findingKind?: string;
+}
 
 /** A chain the agent claims, spanning two or more resources. */
 export interface AgentFinding {
   title: string;
   severity: Severity;
-  resourceExternalIds: string[];
+  /** The ordered path: entry hop first, each later hop naming the edge that reached it. */
+  hops: AgentHop[];
   reasoning: string;
-  supportingFindingKinds: string[];
 }
 
 /**

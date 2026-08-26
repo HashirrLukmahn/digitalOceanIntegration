@@ -55,6 +55,7 @@ export const dropletNoFirewallRule: ExposureRule = {
         kind: "droplet.no_firewall",
         severity: derivation.final,
         confidence: "derived",
+        provesInternetExposure: true,
         title: "Droplet has a public IP and no cloud firewall",
         summary:
           `Droplet "${droplet.name}" is reachable at ${publicIps.join(", ")} and has no ` +
@@ -165,6 +166,7 @@ export const dropletOpenIngressRule: ExposureRule = {
         kind: "droplet.public_ingress",
         severity,
         confidence: "provider_reported",
+        provesInternetExposure: true,
         title:
           services.length > 0
             ? `Droplet exposes ${services.join(", ")} to the internet`
