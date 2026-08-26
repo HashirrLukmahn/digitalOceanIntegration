@@ -15,7 +15,10 @@ import {
   kubernetesPublicEndpointRule,
   loadBalancerPublicRule,
 } from "../src/exposure/rules/network";
-import { kubernetesAutoUpgradeDisabledRule } from "../src/exposure/rules/kubernetes";
+import {
+  kubernetesAutoUpgradeDisabledRule,
+  kubernetesUpgradeAvailableRule,
+} from "../src/exposure/rules/kubernetes";
 import { certificateExpiringRule } from "../src/exposure/rules/certificate";
 
 const ACCOUNT = "acct-1";
@@ -585,6 +588,46 @@ describe("kubernetes auto-upgrade posture", () => {
 
   it("treats an absent auto_upgrade as unknown, not disabled", () => {
     expect(evalWith({ id: "k3", name: "prod" })).toEqual([]);
+  });
+});
+
+describe("kubernetes available upgrades", () => {
+  const evalWith = (cluster: Record<string, unknown>, upgrades: Record<string, unknown[]>) =>
+    kubernetesUpgradeAvailableRule.evaluate(
+      buildContext(
+        inventory({ kubernetes: [cluster as never], kubernetesUpgrades: upgrades as never }),
+      ),
+    );
+
+  it("flags a patch upgrade as the security-relevant case, without claiming unsupported", () => {
+    const [finding] = evalWith(
+      { id: "k1", name: "prod", version: "1.31.1-do.0" },
+      { k1: [{ kubernetes_version: "1.31.3-do.0" }] },
+    );
+    expect(finding!.kind).toBe("kubernetes.upgrade_available");
+    expect(finding!.severity).toBe("low");
+    expect(finding!.provesInternetExposure).toBe(false);
+    expect((finding!.evidence as { patchUpgradeAvailable: boolean }).patchUpgradeAvailable).toBe(true);
+    // Explicitly disclaims the unsupported/EOL claim rather than making it.
+    expect(finding!.summary).toMatch(/does not mean the installed version is unsupported/i);
+    expect(finding!.coverageKeys).toEqual(["kubernetes", "kubernetes_upgrades:k1"]);
+  });
+
+  it("distinguishes a minor-only upgrade from a patch upgrade", () => {
+    const [finding] = evalWith(
+      { id: "k2", name: "prod", version: "1.31.3-do.0" },
+      { k2: [{ kubernetes_version: "1.32.0-do.0" }] },
+    );
+    expect((finding!.evidence as { patchUpgradeAvailable: boolean }).patchUpgradeAvailable).toBe(false);
+  });
+
+  it("says nothing when the provider reports the cluster is up to date", () => {
+    expect(evalWith({ id: "k3", name: "prod", version: "1.31.3-do.0" }, { k3: [] })).toEqual([]);
+  });
+
+  it("treats an unfetched upgrades listing as unknown, not up to date", () => {
+    // No entry for this cluster id -> the child call was not made or failed.
+    expect(evalWith({ id: "k4", name: "prod", version: "1.31.1-do.0" }, {})).toEqual([]);
   });
 });
 

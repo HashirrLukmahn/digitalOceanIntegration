@@ -127,7 +127,9 @@ describe("sync against the fixture account", () => {
     // Control-plane firewall explicitly disabled fires; restricted and null do not.
     expect(byResource.get("do:kubernetes:k8s-prod")?.kind).toBe("kubernetes.public_control_plane");
     expect(byResource.get("do:kubernetes:k8s-prod")?.severity).toBe("medium");
-    expect(byResource.has("do:kubernetes:k8s-staging")).toBe(false);
+    // staging is otherwise clean, but the provider lists a patch upgrade -> a low finding.
+    expect(byResource.get("do:kubernetes:k8s-staging")?.kind).toBe("kubernetes.upgrade_available");
+    expect(byResource.get("do:kubernetes:k8s-staging")?.severity).toBe("low");
     // k8s-legacy has a null control-plane firewall (no finding there) but auto-upgrade is
     // explicitly off, so its only finding is the low-severity patch-hygiene one.
     expect(byResource.get("do:kubernetes:k8s-legacy")?.kind).toBe("kubernetes.auto_upgrade_disabled");

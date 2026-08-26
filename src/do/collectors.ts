@@ -20,6 +20,7 @@ import type {
   DoDatabaseFirewallRule,
   DoDroplet,
   DoFirewall,
+  DoKubernetesAvailableUpgrade,
   DoKubernetesCluster,
   DoLoadBalancer,
   DoProject,
@@ -55,6 +56,8 @@ export interface RawInventory {
   /** Trusted sources, keyed by database cluster id. */
   databaseFirewalls: Record<string, DoDatabaseFirewallRule[]>;
   kubernetes: DoKubernetesCluster[];
+  /** Available upgrade target versions, keyed by cluster id. Absent = not fetched. */
+  kubernetesUpgrades: Record<string, DoKubernetesAvailableUpgrade[]>;
   apps: DoApp[];
   volumes: DoVolume[];
   registries: DoRegistry[];
@@ -76,6 +79,7 @@ export function emptyInventory(): RawInventory {
     databases: [],
     databaseFirewalls: {},
     kubernetes: [],
+    kubernetesUpgrades: {},
     apps: [],
     volumes: [],
     registries: [],
@@ -253,6 +257,28 @@ export const kubernetesCollector: Collector = {
       "/v2/kubernetes/clusters",
       pick("kubernetes_clusters"),
     );
+
+    // Available upgrades are a per-cluster child call. Unlike the database firewalls, a
+    // failure here is *not* all-or-nothing: a missing upgrades listing for one cluster
+    // leaves that cluster's upgrades unknown (the rule stays silent for it) but must not
+    // lose the whole cluster inventory. Each cluster whose call succeeds contributes a
+    // granular coverage key, so a finding can reconcile on the exact cluster it read.
+    const upgrades: Record<string, DoKubernetesAvailableUpgrade[]> = {};
+    const childKeys: string[] = [];
+    for (const cluster of inventory.kubernetes) {
+      try {
+        const body = await http.get<{ available_upgrade_versions?: DoKubernetesAvailableUpgrade[] | null }>(
+          `/v2/kubernetes/clusters/${cluster.id}/upgrades`,
+        );
+        upgrades[cluster.id] = body.available_upgrade_versions ?? [];
+        childKeys.push(`kubernetes_upgrades:${cluster.id}`);
+      } catch {
+        // Leave this cluster's upgrades unknown rather than failing the collector.
+      }
+    }
+    inventory.kubernetesUpgrades = upgrades;
+
+    return { coverageKeys: childKeys };
   },
 };
 

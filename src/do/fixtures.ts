@@ -390,6 +390,14 @@ const FIXTURES: Record<string, unknown> = {
     links: { pages: {} },
   },
 
+  // Per-cluster available upgrades. prod and legacy are current; staging has a patch
+  // upgrade available (1.31.1 -> 1.31.3) -> a low-severity patch-currency finding.
+  "/v2/kubernetes/clusters/k8s-prod/upgrades": { available_upgrade_versions: [] },
+  "/v2/kubernetes/clusters/k8s-staging/upgrades": {
+    available_upgrade_versions: [{ slug: "1.31.3-do.0", kubernetes_version: "1.31.3-do.0" }],
+  },
+  "/v2/kubernetes/clusters/k8s-legacy/upgrades": { available_upgrade_versions: [] },
+
   "/v2/apps": {
     apps: [
       {

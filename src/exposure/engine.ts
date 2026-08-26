@@ -13,7 +13,10 @@ import {
   kubernetesPublicEndpointRule,
   loadBalancerPublicRule,
 } from "./rules/network";
-import { kubernetesAutoUpgradeDisabledRule } from "./rules/kubernetes";
+import {
+  kubernetesAutoUpgradeDisabledRule,
+  kubernetesUpgradeAvailableRule,
+} from "./rules/kubernetes";
 import { spacePublicReadRule } from "./rules/space";
 import { buildContext, fingerprint, type DraftFinding, type ExposureRule } from "./types";
 
@@ -34,6 +37,7 @@ export const RULES: readonly ExposureRule[] = [
   databaseVersionEndOfLifeRule,
   kubernetesPublicEndpointRule,
   kubernetesAutoUpgradeDisabledRule,
+  kubernetesUpgradeAvailableRule,
   appPublicIngressRule,
   appPlaintextSecretEnvRule,
   certificateExpiringRule,

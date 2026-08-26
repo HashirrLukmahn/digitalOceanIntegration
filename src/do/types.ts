@@ -237,6 +237,12 @@ export interface DoControlPlaneFirewall {
   allowed_addresses?: string[];
 }
 
+/** One entry from a cluster's available-upgrades listing. */
+export interface DoKubernetesAvailableUpgrade {
+  slug?: string;
+  kubernetes_version?: string;
+}
+
 export interface DoKubernetesCluster {
   id: string;
   name: string;
