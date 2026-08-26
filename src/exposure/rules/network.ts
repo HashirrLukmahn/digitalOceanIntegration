@@ -1,6 +1,6 @@
 import { externalId } from "../../normalize/resource";
 import { isPublicInternetCidr, isWebPort, SENSITIVE_PORTS } from "../ports";
-import { calibrateSeverity, type Reachability } from "../severity";
+import { deriveSeverity, severityEvidence, type Reachability } from "../severity";
 import type { DraftFinding, ExposureRule } from "../types";
 
 /**
@@ -47,10 +47,16 @@ export const loadBalancerPublicRule: ExposureRule = {
               ? "restricted"
               : "web_ports";
 
+      // network=EXTERNAL is stated by DigitalOcean (provider_reported); falling back to a
+      // populated public IP is a deterministic inference (derived).
+      const confidence = declaredExternal ? "provider_reported" : "derived";
+      const derivation = deriveSeverity("none", reachability);
+
       findings.push({
         resourceExternalId: externalId("loadBalancer", lb.id),
         kind: "load_balancer.public_frontend",
-        severity: calibrateSeverity("none", reachability),
+        severity: derivation.final,
+        confidence,
         title:
           sensitive.length > 0
             ? "Load balancer forwards a sensitive port from the internet"
@@ -64,6 +70,7 @@ export const loadBalancerPublicRule: ExposureRule = {
             ? ` Port(s) ${sensitive.join(", ")} map to services that are not normally exposed.`
             : " A public frontend is expected for a public service; this is recorded for inventory completeness."),
         evidence: {
+          ...severityEvidence(confidence, derivation),
           network: lb.network ?? null,
           publicAddress: lb.ip || null,
           entryPorts,
@@ -122,10 +129,13 @@ export const kubernetesPublicEndpointRule: ExposureRule = {
       // Restricted: firewall on, and nothing in the allowlist admits the whole internet.
       if (enabled && !publicEntry) continue;
 
+      const derivation = deriveSeverity("credential", "web_ports");
+
       findings.push({
         resourceExternalId: externalId("kubernetes", cluster.id),
         kind: "kubernetes.public_control_plane",
-        severity: calibrateSeverity("credential", "web_ports"),
+        severity: derivation.final,
+        confidence: "provider_reported",
         title: "Kubernetes control plane is reachable from any address",
         summary:
           `Cluster "${cluster.name}" exposes its API server at ${cluster.endpoint}` +
@@ -133,6 +143,7 @@ export const kubernetesPublicEndpointRule: ExposureRule = {
             ? ` and its control-plane firewall allows ${publicEntry}, which admits every address.`
             : " and its control-plane firewall is disabled, so no source restriction applies."),
         evidence: {
+          ...severityEvidence("provider_reported", derivation),
           endpoint: cluster.endpoint,
           controlPlaneFirewallEnabled: firewall.enabled ?? false,
           allowedAddresses: allowed,
@@ -170,16 +181,20 @@ export const appPublicIngressRule: ExposureRule = {
 
       const name = app.spec?.name ?? app.id;
 
+      const derivation = deriveSeverity("none", "web_ports");
+
       findings.push({
         resourceExternalId: externalId("app", app.id),
         kind: "app.public_ingress",
-        severity: calibrateSeverity("none", "web_ports"),
+        severity: derivation.final,
+        confidence: "provider_reported",
         title: "App Platform app is publicly reachable",
         summary:
           `App "${name}" serves traffic publicly at ${url}. This is the expected behaviour for ` +
           `an App Platform service and is recorded so the inventory reflects every ` +
           `internet-facing entry point.`,
         evidence: {
+          ...severityEvidence("provider_reported", derivation),
           liveUrl: app.live_url ?? null,
           defaultIngress: app.default_ingress ?? null,
           liveDomain: app.live_domain ?? null,

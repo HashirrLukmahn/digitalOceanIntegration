@@ -5,7 +5,13 @@ import {
   parsePorts,
   sensitivePortsInRange,
 } from "../ports";
-import { calibrateSeverity, maxSeverity, type Reachability } from "../severity";
+import {
+  calibrateSeverity,
+  deriveSeverity,
+  maxSeverity,
+  severityEvidence,
+  type Reachability,
+} from "../severity";
 import { publicAddresses, type DraftFinding, type ExposureRule } from "../types";
 
 /**
@@ -40,16 +46,22 @@ export const dropletNoFirewallRule: ExposureRule = {
       const firewalls = firewallsByDropletId.get(droplet.id) ?? [];
       if (firewalls.length > 0) continue;
 
+      // Derived, not provider-reported: the exposure is inferred from a public IP plus the
+      // *absence* of any attached firewall in a complete firewall listing.
+      const derivation = deriveSeverity("none", "all_ports");
+
       findings.push({
         resourceExternalId: externalId("droplet", droplet.id),
         kind: "droplet.no_firewall",
-        severity: calibrateSeverity("none", "all_ports"),
+        severity: derivation.final,
+        confidence: "derived",
         title: "Droplet has a public IP and no cloud firewall",
         summary:
           `Droplet "${droplet.name}" is reachable at ${publicIps.join(", ")} and has no ` +
           `DigitalOcean cloud firewall attached, by id or by tag. Every port its operating ` +
           `system listens on is reachable from the internet.`,
         evidence: {
+          ...severityEvidence("derived", derivation),
           publicAddresses: publicIps,
           attachedFirewallCount: 0,
           dropletTags: droplet.tags ?? [],
@@ -143,10 +155,16 @@ export const dropletOpenIngressRule: ExposureRule = {
         ...new Set(openRules.flatMap((r) => r.sensitiveServices.map((s) => s.service))),
       ];
 
+      // The open rule is stated verbatim by DigitalOcean, so provider_reported. The
+      // derivation reflects the worst reachability, so `derivation.final === severity`;
+      // the loop's `severity` stays authoritative and the derivation only explains it.
+      const derivation = deriveSeverity("none", reachability);
+
       findings.push({
         resourceExternalId: externalId("droplet", droplet.id),
         kind: "droplet.public_ingress",
         severity,
+        confidence: "provider_reported",
         title:
           services.length > 0
             ? `Droplet exposes ${services.join(", ")} to the internet`
@@ -160,6 +178,7 @@ export const dropletOpenIngressRule: ExposureRule = {
             ? ` This includes ${services.join(", ")}, which should not be internet-facing.`
             : ""),
         evidence: {
+          ...severityEvidence("provider_reported", derivation),
           publicAddresses: publicIps,
           reachability,
           openRules: openRules.map((r) => ({

@@ -110,8 +110,10 @@ export const appPlaintextSecretEnvRule: ExposureRule = {
         resourceExternalId: externalId("app", app.id),
         kind: "app.plaintext_secret_env",
         // Not internet reachability, so severity reflects disclosure risk to anyone
-        // with read access to the account rather than to the whole internet.
+        // with read access to the account rather than to the whole internet. The
+        // GENERAL type is a value DigitalOcean returns, so confidence is provider_reported.
         severity: "medium",
+        confidence: "provider_reported",
         title: `App stores ${offenders.length} credential-like variable(s) in plaintext`,
         summary:
           `App "${name}" defines ${offenders.length} environment variable(s) whose names ` +
@@ -120,6 +122,15 @@ export const appPlaintextSecretEnvRule: ExposureRule = {
           `returned in plaintext by the apps API, so anyone who can read this app's spec can ` +
           `read the value.`,
         evidence: {
+          // A disclosure finding rather than a reachability one, so severity is a fixed
+          // level with an explicit rationale rather than a sensitivity × reachability draw.
+          confidence: "provider_reported",
+          severityRationale: {
+            base: "medium",
+            modifiers: [],
+            final: "medium",
+            formula: "credential disclosure to anyone with read access to the app spec ⇒ medium",
+          },
           // Names and locations only. The values are deliberately never read.
           variables: offenders,
           valuesInspected: false,

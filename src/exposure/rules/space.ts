@@ -1,5 +1,5 @@
 import { externalId } from "../../normalize/resource";
-import { calibrateSeverity } from "../severity";
+import { deriveSeverity, severityEvidence } from "../severity";
 import type { DraftFinding, ExposureRule } from "../types";
 
 /**
@@ -22,16 +22,22 @@ export const spacePublicReadRule: ExposureRule = {
     for (const probe of inventory.spaces) {
       if (!probe.publiclyListable) continue;
 
+      // The strongest evidence class in the codebase: an anonymous request was made and
+      // succeeded, so confidence is active_probe rather than an inference.
+      const derivation = deriveSeverity("datastore", "sensitive_ports");
+
       findings.push({
         resourceExternalId: externalId("space", probe.bucket.name),
         kind: "space.public_read",
-        severity: calibrateSeverity("datastore", "sensitive_ports"),
+        severity: derivation.final,
+        confidence: "active_probe",
         title: "Spaces bucket is readable by anyone",
         summary:
           `Bucket "${probe.bucket.name}" in ${probe.bucket.region} returned its object listing ` +
           `to an unauthenticated request. Anyone who knows or guesses the bucket name can ` +
           `enumerate and download its contents without credentials.`,
         evidence: {
+          ...severityEvidence("active_probe", derivation),
           endpoint: probe.endpoint,
           region: probe.bucket.region,
           // The proof: an anonymous request, and what it returned.

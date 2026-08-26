@@ -1,6 +1,6 @@
 import { externalId } from "../../normalize/resource";
 import { isPublicInternetCidr } from "../ports";
-import { calibrateSeverity } from "../severity";
+import { deriveSeverity, severityEvidence } from "../severity";
 import type { DraftFinding, ExposureRule } from "../types";
 
 /**
@@ -32,10 +32,15 @@ export const databasePublicNoTrustedSourcesRule: ExposureRule = {
       if (rules === undefined) continue; // unknown, not empty -- see module comment
       if (rules.length > 0) continue;
 
+      // Derived: the public endpoint is reported, but the *absence* of trusted sources is
+      // inferred from a firewall list that returned successfully and was empty.
+      const derivation = deriveSeverity("datastore", "sensitive_ports");
+
       findings.push({
         resourceExternalId: externalId("database", cluster.id),
         kind: "database.public_no_trusted_sources",
-        severity: calibrateSeverity("datastore", "sensitive_ports"),
+        severity: derivation.final,
+        confidence: "derived",
         title: "Managed database is reachable from the internet with no trusted sources",
         summary:
           `Database cluster "${cluster.name}" (${cluster.engine ?? "unknown engine"}) exposes a ` +
@@ -43,6 +48,7 @@ export const databasePublicNoTrustedSourcesRule: ExposureRule = {
           `sources configured, so any host on the internet can open a connection and attempt ` +
           `to authenticate.`,
         evidence: {
+          ...severityEvidence("derived", derivation),
           publicHost: host,
           publicPort: cluster.connection?.port ?? null,
           engine: cluster.engine ?? null,
@@ -80,16 +86,21 @@ export const databaseTrustedSourceIsPublicRule: ExposureRule = {
 
       const host = cluster.connection?.host ?? null;
 
+      // Provider_reported: the 0.0.0.0/0 trusted source is a value DigitalOcean returned.
+      const derivation = deriveSeverity("datastore", "sensitive_ports");
+
       findings.push({
         resourceExternalId: externalId("database", cluster.id),
         kind: "database.trusted_source_is_public",
-        severity: calibrateSeverity("datastore", "sensitive_ports"),
+        severity: derivation.final,
+        confidence: "provider_reported",
         title: "Managed database trusts the entire internet",
         summary:
           `Database cluster "${cluster.name}" has a trusted source of ` +
           `${publicRules.map((r) => r.value).join(", ")}, which allows connections from any ` +
           `address. The trusted-source list is present but does not restrict anything.`,
         evidence: {
+          ...severityEvidence("provider_reported", derivation),
           publicHost: host,
           publicPort: cluster.connection?.port ?? null,
           engine: cluster.engine ?? null,

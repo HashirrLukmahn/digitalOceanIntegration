@@ -27,6 +27,40 @@ function Provenance({ evidence }: { evidence: Record<string, unknown> }) {
   );
 }
 
+const CONFIDENCE_LABEL: Record<string, string> = {
+  provider_reported: "Provider-reported",
+  derived: "Derived",
+  active_probe: "Active probe",
+  heuristic: "Heuristic",
+};
+
+/**
+ * Why the finding has the severity it does, and how strongly the evidence supports it.
+ *
+ * Severity is impact; confidence is proof. Showing the derivation makes the number
+ * auditable -- a reviewer sees `datastore × sensitive-port reachability ⇒ critical`
+ * rather than being asked to trust a label -- and the confidence chip keeps a high-impact
+ * heuristic from being mistaken for a verified exposure.
+ */
+function SeverityRationale({ evidence }: { evidence: Record<string, unknown> }) {
+  const rationale = evidence.severityRationale as { formula?: unknown } | undefined;
+  const formula = rationale && typeof rationale.formula === "string" ? rationale.formula : null;
+  const confidence = typeof evidence.confidence === "string" ? evidence.confidence : null;
+  if (!formula && !confidence) return null;
+
+  return (
+    <div className="mb-3">
+      <div className="eyebrow mb-1">Severity rationale</div>
+      {formula && <p className="font-mono text-[0.78rem] text-ink">{formula}</p>}
+      {confidence && (
+        <span className="mt-1.5 inline-block rounded border border-rule px-1.5 py-0.5 text-[0.7rem] text-faint">
+          Confidence: {CONFIDENCE_LABEL[confidence] ?? confidence}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex gap-3 py-1">
@@ -115,6 +149,8 @@ const LABELS: Record<string, string> = {
 };
 
 const HANDLED = new Set([
+  "confidence",
+  "severityRationale",
   "determinedBy",
   "method",
   "note",
@@ -155,6 +191,7 @@ export function Evidence({ evidence }: { evidence: Record<string, unknown> }) {
   return (
     <div className="space-y-4">
       <Provenance evidence={evidence} />
+      <SeverityRationale evidence={evidence} />
 
       {openRules && openRules.length > 0 && <OpenRules rules={openRules} />}
       {variables && variables.length > 0 && <Variables variables={variables} />}
