@@ -1,3 +1,5 @@
+import { dataSource } from "../lib/env";
+import { FIXTURE_SPACES, fixtureSpacesFetcher } from "./fixtures";
 import type { DoHttp } from "./http";
 import { collectPaged } from "./paginate";
 import {
@@ -193,26 +195,26 @@ export const databasesCollector: Collector = {
   required: true,
   resourceTypes: ["digitalocean.database_cluster"],
   async run(http, inventory) {
-    inventory.databases = await collectPaged<DoDatabaseCluster>(
+    const databases = await collectPaged<DoDatabaseCluster>(
       http,
       "/v2/databases",
       pick("databases"),
     );
+    const firewalls: Record<string, DoDatabaseFirewallRule[]> = {};
 
     // Trusted sources are per-cluster. Without them we cannot tell an internet-facing
-    // database from one that merely has a public hostname, so this is not optional --
-    // but one cluster failing should not lose the others.
-    for (const cluster of inventory.databases) {
-      try {
-        const body = await http.get<{ rules?: DoDatabaseFirewallRule[] }>(
-          `/v2/databases/${cluster.id}/firewall`,
-        );
-        inventory.databaseFirewalls[cluster.id] = body.rules ?? [];
-      } catch {
-        // Absent means "unknown", never "none" -- the exposure rule distinguishes them.
-        delete inventory.databaseFirewalls[cluster.id];
-      }
+    // database from one that merely has a public hostname, so publish nothing until
+    // every request succeeds. A partial database snapshot could overwrite a known
+    // exposure with "not exposed" simply because its firewall request failed.
+    for (const cluster of databases) {
+      const body = await http.get<{ rules?: DoDatabaseFirewallRule[] }>(
+        `/v2/databases/${cluster.id}/firewall`,
+      );
+      firewalls[cluster.id] = body.rules ?? [];
     }
+
+    inventory.databases = databases;
+    inventory.databaseFirewalls = firewalls;
   },
 };
 
@@ -296,7 +298,11 @@ export function createSpacesCollector(options: {
     required: false,
     resourceTypes: ["digitalocean.space"],
     async run(http, inventory) {
-      const config = options.config ?? loadSpacesConfig();
+      // Sample-data mode must not reach the network for the one collector that does
+      // not route through `http`. Explicit options still win, so tests are unaffected.
+      const recorded = dataSource() === "fixtures";
+      const config = options.config ?? (recorded ? FIXTURE_SPACES : loadSpacesConfig());
+      const fetcher = options.fetcher ?? (recorded ? fixtureSpacesFetcher : undefined);
       const mode = spacesMode(config);
       inventory.spacesMode = mode;
 
@@ -325,7 +331,7 @@ export function createSpacesCollector(options: {
         buckets = buckets.filter((bucket) => granted.has(bucket.name));
       }
 
-      inventory.spaces = await probeBuckets(buckets, options.fetcher);
+      inventory.spaces = await probeBuckets(buckets, fetcher);
     },
   };
 }

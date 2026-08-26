@@ -53,3 +53,20 @@ describe("status never exposes the credential", () => {
     expect(tokenFingerprint(undefined)).toBeNull();
   });
 });
+
+describe("chat persists identifiable messages", () => {
+  it("assigns the assistant message an id server-side", async () => {
+    // Without `generateMessageId` the SDK persists the assistant turn with an empty
+    // id. One answer looks fine; a second one renders a sibling keyed "" and React
+    // can no longer tell the two turns apart across a re-render. The id must be
+    // assigned here rather than in the browser, because this is what gets stored and
+    // read back when the conversation is reopened.
+    const raw = await import("node:fs").then((fs) =>
+      fs.readFileSync("app/api/chat/route.ts", "utf8"),
+    );
+    const code = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+
+    expect(code).toMatch(/toUIMessageStreamResponse\(/);
+    expect(code).toMatch(/generateMessageId:/);
+  });
+});

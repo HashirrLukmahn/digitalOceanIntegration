@@ -58,7 +58,7 @@ npm run dev          # start the app
 npm run build        # production build
 npm run db:migrate   # apply checked-in migrations
 npm run db:generate  # new migration after a schema change
-npm test             # 193 tests
+npm test             # 244 tests
 npm run typecheck    # tsc --noEmit
 ```
 
@@ -162,7 +162,7 @@ See [DESIGN-NOTES.md](DESIGN-NOTES.md) for why this is the shape it is.
 
 ## Tests
 
-193 tests, no network access required.
+244 tests, no network access required.
 
 | Area | Covers |
 |---|---|

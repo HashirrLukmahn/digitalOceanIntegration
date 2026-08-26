@@ -18,11 +18,13 @@ beforeEach(() => {
   ({ db, close } = createTestDb());
   setDbForTest(db);
   delete process.env.DIGITALOCEAN_TOKEN;
+  delete process.env.DATA_SOURCE;
 });
 
 afterEach(() => {
   setDbForTest(undefined);
   delete process.env.DIGITALOCEAN_TOKEN;
+  delete process.env.DATA_SOURCE;
   close();
 });
 
@@ -47,6 +49,19 @@ describe("connection stages", () => {
     const state = connectionState();
     expect(state.stage).toBe("ready");
     expect(state.teamName).toBe("Acme Platform");
+  });
+
+  it("counts sample-data mode as a connection, with no credential present", async () => {
+    // The token-free path an evaluator without a DigitalOcean account has to take.
+    // Gating it behind a credential it does not use closes the app on its own demo.
+    process.env.DATA_SOURCE = "fixtures";
+    expect(connectionState().stage).toBe("connected_unsynced");
+
+    await runSync({ http: new FixtureDoHttp(), db });
+
+    const state = connectionState();
+    expect(state.stage).toBe("ready");
+    expect(state.source).toBe("fixtures");
   });
 
   it("stays disconnected when a snapshot exists but the credential is gone", async () => {

@@ -5,7 +5,11 @@ import {
   emptyInventory,
   type RawInventory,
 } from "../src/do/collectors";
+import { FixtureDoHttp } from "../src/do/fixtures";
 import type { DoHttp } from "../src/do/http";
+import { cloudRelationships, cloudResources, exposureFindings } from "../src/db/schema";
+import { runSync } from "../src/sync/run";
+import { createTestDb } from "./helpers/db";
 import {
   bucketEndpoint,
   loadSpacesConfig,
@@ -278,5 +282,92 @@ describe("rule: publicly readable bucket", () => {
       ]),
     );
     expect(result.exposedResourceIds.has("do:space:leaky")).toBe(true);
+  });
+});
+
+/**
+ * Sample-data mode has to be genuinely offline.
+ *
+ * Spaces is the one collector that cannot swap transport through `DoHttp`: detecting a
+ * public bucket is an anonymous request straight to the S3-compatible endpoint, which
+ * has no v2 equivalent to record. Before this was wired up, `DATA_SOURCE=fixtures`
+ * with `SPACES_BUCKETS` still set produced a hybrid run -- recorded inventory, real
+ * buckets probed over the internet -- and reported it as complete coverage.
+ */
+describe("spaces in sample-data mode", () => {
+  const withFixtureMode = async <T,>(body: () => Promise<T>): Promise<T> => {
+    const before = { ds: process.env.DATA_SOURCE, buckets: process.env.SPACES_BUCKETS };
+    const realFetch = globalThis.fetch;
+    process.env.DATA_SOURCE = "fixtures";
+    // Deliberately left pointing at real buckets: the mode must win over the config.
+    process.env.SPACES_BUCKETS = "sfo1/some-real-bucket";
+    globalThis.fetch = (async (input: unknown) => {
+      throw new Error(`sample-data mode reached the network: ${String(input)}`);
+    }) as typeof fetch;
+
+    try {
+      return await body();
+    } finally {
+      globalThis.fetch = realFetch;
+      process.env.DATA_SOURCE = before.ds;
+      process.env.SPACES_BUCKETS = before.buckets;
+      if (before.ds === undefined) delete process.env.DATA_SOURCE;
+      if (before.buckets === undefined) delete process.env.SPACES_BUCKETS;
+    }
+  };
+
+  it("uses recorded buckets and never touches the network", async () => {
+    const result = await withFixtureMode(async () => {
+      const { db, close } = createTestDb();
+      const run = await runSync({ http: new FixtureDoHttp(), db });
+      const spaces = db
+        .select()
+        .from(cloudResources)
+        .all()
+        .filter((r) => r.resourceType === "digitalocean.space");
+      close();
+      return { run, spaces };
+    });
+
+    // The env named one live bucket; the recorded pair is what came back.
+    expect(result.spaces.map((s) => s.externalId).sort()).toEqual([
+      "do:space:acme-backups",
+      "do:space:acme-public-assets",
+    ]);
+    expect(result.run.coverage.unavailableCollectors).toEqual([]);
+    expect(result.run.status).toBe("completed");
+  });
+
+  it("carries a public bucket and its true negative, and links both to the project", async () => {
+    const { findings, edges } = await withFixtureMode(async () => {
+      const { db, close } = createTestDb();
+      await runSync({ http: new FixtureDoHttp(), db });
+      const findings = db
+        .select()
+        .from(exposureFindings)
+        .all()
+        .filter((f) => f.kind.startsWith("space."));
+      const edges = db
+        .select()
+        .from(cloudRelationships)
+        .all()
+        .filter((e) => e.targetExternalId.startsWith("do:space:"));
+      close();
+      return { findings, edges };
+    });
+
+    // Exactly one of the two buckets is public, so the corpus proves the rule fires
+    // and that it stays silent on the restricted one.
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.resourceExternalId).toBe("do:space:acme-public-assets");
+    expect(findings[0]!.severity).toBe("critical");
+
+    // Regression: Spaces were missing from the derivation's known-resource set, so
+    // these edges were silently dropped despite the bucket being inventoried.
+    expect(edges.map((e) => e.targetExternalId).sort()).toEqual([
+      "do:space:acme-backups",
+      "do:space:acme-public-assets",
+    ]);
+    expect(edges.every((e) => e.relationship === "contains")).toBe(true);
   });
 });

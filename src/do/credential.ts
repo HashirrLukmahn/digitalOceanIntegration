@@ -1,5 +1,5 @@
 import "server-only";
-import { environmentToken } from "../lib/env";
+import { dataSource, environmentToken } from "../lib/env";
 import { oauthAccessToken } from "../oauth/digitalocean";
 
 /**
@@ -17,9 +17,13 @@ export function digitalOceanCredential(): string | undefined {
   return oauthAccessToken() ?? environmentToken();
 }
 
-export type CredentialSource = "oauth" | "environment" | "none";
+export type CredentialSource = "fixtures" | "oauth" | "environment" | "none";
 
 export function credentialSource(): CredentialSource {
+  // Sample-data mode calls no API, so there is no credential to have. Reporting "none"
+  // would gate the whole app behind a connection it does not need, which is exactly
+  // the token-free path an evaluator without a DigitalOcean account has to take.
+  if (dataSource() === "fixtures") return "fixtures";
   if (oauthAccessToken()) return "oauth";
   return environmentToken() ? "environment" : "none";
 }

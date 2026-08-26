@@ -195,15 +195,25 @@ export async function runSync(options: SyncOptions): Promise<SyncResult> {
     // set is simply replaced. Scoped to the types this run was authoritative for, so
     // a failed collector does not delete edges it could not observe.
     const staleEdges = tx
-      .select({ id: cloudRelationships.id, source: cloudRelationships.sourceExternalId })
+      .select({
+        id: cloudRelationships.id,
+        source: cloudRelationships.sourceExternalId,
+        target: cloudRelationships.targetExternalId,
+      })
       .from(cloudRelationships)
       .where(eq(cloudRelationships.accountId, accountId))
       .all();
 
     const removableEdgeIds = staleEdges
       .filter((edge) => {
-        const type = resourceTypeFromExternalId(edge.source);
-        return type !== null && authoritativeTypes.has(type);
+        const sourceType = resourceTypeFromExternalId(edge.source);
+        const targetType = resourceTypeFromExternalId(edge.target);
+        return (
+          sourceType !== null &&
+          targetType !== null &&
+          authoritativeTypes.has(sourceType) &&
+          authoritativeTypes.has(targetType)
+        );
       })
       .map((edge) => edge.id);
 

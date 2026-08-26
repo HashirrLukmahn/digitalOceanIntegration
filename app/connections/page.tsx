@@ -5,6 +5,7 @@ import { hasMasterKey } from "../../src/oauth/crypto";
 import { dataSource } from "../../src/lib/env";
 import { counts, getAccount } from "../../src/data/queries";
 import { DisconnectButton } from "../disconnect-button";
+import { SyncButton } from "../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -23,11 +24,20 @@ const REDIRECT_REASONS: Record<string, string> = {
 /** Off until proven on. */
 function StatusRow({ state }: { state: ReturnType<typeof connectionState> }) {
   const tone =
-    state.stage === "ready"
-      ? { dot: "bg-ok", label: "Connected", text: "text-ok" }
-      : state.stage === "connected_unsynced"
-        ? { dot: "bg-medium", label: "Connected, not synced", text: "text-medium" }
-        : { dot: "bg-rule", label: "Not connected", text: "text-faint" };
+    state.source === "fixtures"
+      ? { dot: "bg-medium", label: "Sample data", text: "text-medium" }
+      : state.stage === "ready"
+        ? { dot: "bg-ok", label: "Connected", text: "text-ok" }
+        : state.stage === "connected_unsynced"
+          ? { dot: "bg-medium", label: "Connected, not synced", text: "text-medium" }
+          : { dot: "bg-rule", label: "Not connected", text: "text-faint" };
+
+  const via =
+    state.source === "oauth"
+      ? "OAuth"
+      : state.source === "environment"
+        ? "access token"
+        : "recorded fixtures";
 
   return (
     <div className="panel flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3">
@@ -40,7 +50,7 @@ function StatusRow({ state }: { state: ReturnType<typeof connectionState> }) {
         <span className="text-[0.8rem] text-muted">
           via{" "}
           <span className="font-mono">
-            {state.source === "oauth" ? "OAuth" : "access token"}
+            {via}
           </span>
         </span>
       )}
@@ -74,6 +84,19 @@ export default async function ConnectionMethodPage({
   const oauthReady = Boolean(oauthConfig()) && hasMasterKey();
   const usingFixtures = dataSource() === "fixtures";
 
+  // Both methods stay visible in sample-data mode so the tradeoff is still readable,
+  // but neither is actionable: the transport is fixtures whatever credential exists,
+  // so authorizing here would store a real token and then quietly ignore it.
+  const sampleDataNotice = (
+    <div className="text-[0.8rem] text-muted">
+      <p className="font-medium text-ink">Not available in sample-data mode</p>
+      <p className="mt-0.5">
+        Set <span className="font-mono">DATA_SOURCE=live</span> in{" "}
+        <span className="font-mono">.env</span> and restart to connect a real account.
+      </p>
+    </div>
+  );
+
   return (
     <div className="max-w-5xl space-y-8">
       {explanation && (
@@ -97,7 +120,20 @@ export default async function ConnectionMethodPage({
 
       <StatusRow state={state} />
 
-      {state.stage !== "disconnected" && (
+      {state.source === "fixtures" && (
+        <div className="panel flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-ink">No credential needed here</p>
+            <p className="mt-0.5 text-sm leading-relaxed text-muted">
+              Collectors, normalization and the exposure rules run the identical code
+              path against recorded payloads. Sync to open the rest of the app.
+            </p>
+          </div>
+          <SyncButton label={state.stage === "ready" ? "Sync again" : "Run the sync"} />
+        </div>
+      )}
+
+      {state.stage !== "disconnected" && state.source !== "fixtures" && (
         <DisconnectButton counts={{ resources: summary.resources, findings: summary.findings }} />
       )}
 
@@ -146,7 +182,9 @@ export default async function ConnectionMethodPage({
           </dl>
 
           <div className="mt-auto pt-5">
-            {oauthReady ? (
+            {usingFixtures ? (
+              sampleDataNotice
+            ) : oauthReady ? (
               <a href="/api/connection/oauth/start" className="btn-primary">
                 Connect with DigitalOcean
               </a>
@@ -210,9 +248,13 @@ export default async function ConnectionMethodPage({
           </dl>
 
           <div className="mt-auto pt-5">
-            <Link href="/connections/api-token" className="btn-quiet">
-              Use an access token
-            </Link>
+            {usingFixtures ? (
+              sampleDataNotice
+            ) : (
+              <Link href="/connections/api-token" className="btn-quiet">
+                Use an access token
+              </Link>
+            )}
           </div>
         </div>
       </div>

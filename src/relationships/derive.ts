@@ -41,6 +41,10 @@ export function deriveRelationships(inventory: RawInventory): DerivedRelationshi
     ...inventory.apps.map((a) => externalId("app", a.id)),
     ...inventory.volumes.map((v) => externalId("volume", v.id)),
     ...inventory.registries.map((r) => externalId("registry", r.name)),
+    // Spaces are keyed by bucket name, which is exactly what the project URN carries.
+    // Omitting them here silently dropped every project->space edge: the bucket was
+    // inventoried, the membership was reported, and the edge vanished as "dangling".
+    ...inventory.spaces.map((s) => externalId("space", s.bucket.name)),
   ]);
 
   // --- Project contains resource -------------------------------------------------

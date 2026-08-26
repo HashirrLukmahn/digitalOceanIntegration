@@ -38,6 +38,15 @@ const rows = {
   accounts: () => db.select().from(cloudAccounts).all(),
 };
 
+class FirewallBlind extends FixtureDoHttp {
+  override async get<T>(pathOrUrl: string, query?: QueryParams): Promise<T> {
+    if (/^\/v2\/databases\/[^/]+\/firewall$/.test(pathOrUrl)) {
+      throw new Error("503 Service Unavailable");
+    }
+    return super.get<T>(pathOrUrl, query);
+  }
+}
+
 describe("sync against the fixture account", () => {
   it("records the account and a terminal run", async () => {
     const result = await runSync({ http: new FixtureDoHttp(), db });
@@ -72,6 +81,22 @@ describe("sync against the fixture account", () => {
     // Everything else ran.
     expect(result.coverage.failedCollectors).toEqual([]);
     expect(result.coverage.completedCollectors).toHaveLength(COLLECTORS.length - 1);
+  });
+
+  it("does not claim complete coverage when a cluster's trusted sources are unreadable", async () => {
+    const result = await runSync({ http: new FirewallBlind(), db });
+
+    expect(result.status).toBe("partial");
+    expect(result.coverage.completedCollectors).not.toContain("databases");
+
+    const failure = result.coverage.failedCollectors.find((c) => c.collector === "databases");
+    expect(failure).toBeDefined();
+    expect(failure!.message).toMatch(/503 Service Unavailable/);
+
+    // No half-assessed database state is published.
+    expect(
+      rows.resources().filter((r) => r.resourceType === "digitalocean.database_cluster").length,
+    ).toBe(0);
   });
 
   it("produces the expected findings and no false positives", async () => {
@@ -267,6 +292,47 @@ describe("reconciliation", () => {
     const droplets = rows.resources().filter((r) => r.resourceType === "digitalocean.droplet");
     expect(droplets).toHaveLength(4);
     expect(droplets.every((d) => d.removedAt === null)).toBe(true);
+  });
+
+  it("keeps the last known-good database state when trusted-source collection fails", async () => {
+    const clock = fixedClock();
+    await runSync({ http: new FixtureDoHttp(), db, now: clock.now });
+
+    const resourceBefore = rows.resources().find(
+      (r) => r.externalId === "do:dbaas:db-analytics",
+    )!;
+    const findingBefore = rows.findings().find(
+      (f) => f.resourceExternalId === "do:dbaas:db-analytics",
+    )!;
+    const relationshipsBefore = rows.relationships().filter(
+      (edge) =>
+        edge.sourceExternalId === "do:dbaas:db-analytics" ||
+        edge.targetExternalId === "do:dbaas:db-analytics",
+    );
+
+    clock.advance(60_000);
+    const result = await runSync({ http: new FirewallBlind(), db, now: clock.now });
+
+    const resourceAfter = rows.resources().find(
+      (r) => r.externalId === "do:dbaas:db-analytics",
+    )!;
+    const findingAfter = rows.findings().find(
+      (f) => f.resourceExternalId === "do:dbaas:db-analytics",
+    )!;
+    const relationshipsAfter = rows.relationships().filter(
+      (edge) =>
+        edge.sourceExternalId === "do:dbaas:db-analytics" ||
+        edge.targetExternalId === "do:dbaas:db-analytics",
+    );
+
+    expect(result.status).toBe("partial");
+    expect(result.coverage.failedCollectors.map((c) => c.collector)).toContain("databases");
+    expect(resourceAfter.lastSeenAt).toEqual(resourceBefore.lastSeenAt);
+    expect(resourceAfter.isInternetExposed).toBe(true);
+    expect(resourceAfter.removedAt).toBeNull();
+    expect(findingAfter.lastSeenAt).toEqual(findingBefore.lastSeenAt);
+    expect(findingAfter.resolvedAt).toBeNull();
+    expect(relationshipsAfter).toEqual(relationshipsBefore);
   });
 
   it("still reconciles the types whose collectors did succeed", async () => {

@@ -1,4 +1,10 @@
-import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from "ai";
+import {
+  convertToModelMessages,
+  createIdGenerator,
+  stepCountIs,
+  streamText,
+  type UIMessage,
+} from "ai";
 import { agentApiKey, agentModel, MISSING_KEY_MESSAGE } from "../../../src/agent/model";
 import { buildTools } from "../../../src/agent/tools";
 import { getAccount } from "../../../src/data/queries";
@@ -53,6 +59,11 @@ export async function POST(request: Request) {
 
   return result.toUIMessageStreamResponse({
     originalMessages: messages,
+    // Without this the assistant message is persisted with an empty id, so a thread
+    // with two answers renders two children keyed "" -- React then cannot tell the
+    // turns apart across a re-render. The id has to be assigned server-side because
+    // it is what gets stored and re-read when the conversation is reopened.
+    generateMessageId: createIdGenerator({ prefix: "msg", size: 16 }),
     // Persist once the turn is complete, so a reload or the history drawer shows the
     // whole exchange rather than the half that had streamed.
     onFinish: ({ messages: finalMessages }) => {

@@ -1,4 +1,5 @@
 import type { DoHttp, QueryParams } from "./http";
+import type { Fetcher, SpacesConfig } from "./spaces";
 
 /**
  * Fixture transport.
@@ -125,6 +126,8 @@ const FIXTURES: Record<string, unknown> = {
       { urn: "do:loadbalancer:lb-public", assigned_at: "2025-02-01T00:00:00Z", status: "ok" },
       { urn: "do:kubernetes:k8s-prod", assigned_at: "2025-04-01T00:00:00Z", status: "ok" },
       { urn: "do:app:app-storefront", assigned_at: "2025-06-01T00:00:00Z", status: "ok" },
+      { urn: "do:space:acme-public-assets", assigned_at: "2024-07-15T00:00:00Z", status: "ok" },
+      { urn: "do:space:acme-backups", assigned_at: "2024-07-15T00:00:00Z", status: "ok" },
       // Deliberately references a type this app does not inventory; must be dropped
       // rather than left as a dangling edge.
       { urn: "do:image:9999", assigned_at: "2025-06-01T00:00:00Z", status: "ok" },
@@ -425,6 +428,30 @@ const FIXTURES: Record<string, unknown> = {
     ],
     links: { pages: {} },
   },
+};
+
+/**
+ * Spaces in sample-data mode.
+ *
+ * Every other collector swaps transport through `DoHttp`. Spaces cannot: detecting a
+ * public bucket is an anonymous request straight to the S3-compatible endpoint, which
+ * has no v2 equivalent to record. Left alone, sample-data mode would reach the real
+ * internet for this one collector and report a run that is part recorded, part live.
+ *
+ * `acme-public-assets` answers 200 to an unauthenticated list, which is what proves
+ * public access by demonstration. `acme-backups` answers 403, so the corpus carries
+ * the true negative next to the finding.
+ */
+export const FIXTURE_SPACES: SpacesConfig = {
+  buckets: [
+    { region: "nyc3", name: "acme-public-assets" },
+    { region: "nyc3", name: "acme-backups" },
+  ],
+};
+
+export const fixtureSpacesFetcher: Fetcher = async (url) => {
+  const status = url.includes("acme-public-assets") ? 200 : 403;
+  return { status, text: async () => "" };
 };
 
 export class FixtureDoHttp implements DoHttp {

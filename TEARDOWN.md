@@ -6,10 +6,20 @@ Delete when done; the database is the only one that costs real money if forgotte
 | Resource | ID | $/hr |
 |---|---|---|
 | Droplet `web-01` (no firewall) | `595135348` | 0.00595 |
-| Droplet `api-01` | `595135351` | 0.00595 |
-| Postgres `scanner-test-pg` | `fa974059-fc39-424f-9bcc-086c588d3aeb` | ~0.022 |
+| Droplet `api-01` (SSH open to world) | `595135351` | 0.00595 |
+| Postgres `scanner-test-pg` | `fa974059-fc39-424f-9bcc-086c588d3aeb` | ~0.0208 |
+| Load balancer `nyc3-load-balancer-01` | `eb759e46-4760-46f5-8e00-6e33868bee08` | ~0.0179 |
+| App Platform `seahorse-app` | `8f0e6b09-bd7f-4379-a77e-49dfc241590b` | ~0.0069 |
+| DOKS worker x3 (`s-2vcpu-2gb`) | pool `t04jobgqz` | 0.0804 |
+| **DOKS HA control plane** | `513f078a-dcce-49f9-9eb1-79613473fcb7` | **~0.0556** |
+| Spaces `bucket-02`, `cold-bucket-1` | sfo1 | ~0.0069 |
 
-**Total ≈ $0.034/hr — about $0.82/day, $5.70/week.**
+**Total ≈ $0.19/hr — about $4.50/day, $31/week, $135/month.**
+
+> The HA control plane is $40/month on its own and buys nothing for this test — a
+> non-HA cluster reads identically to the scanner. Recreating the cluster without HA
+> cuts the bill by roughly a third. The three `s-2vcpu-2gb` workers are the next
+> largest line; `s-1vcpu-2gb` would halve them.
 
 Everything is tagged `scanner-test`.
 
