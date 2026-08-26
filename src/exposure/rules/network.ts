@@ -1,4 +1,5 @@
 import { externalId } from "../../normalize/resource";
+import { backendPortReachability } from "../effective-policy";
 import { isPublicInternetCidr, isWebPort, SENSITIVE_PORTS } from "../ports";
 import { deriveSeverity, severityEvidence, type Reachability } from "../severity";
 import type { DraftFinding, ExposureRule } from "../types";
@@ -212,6 +213,120 @@ export const appPublicIngressRule: ExposureRule = {
           "No action required if the app is meant to be public. Confirm that any admin routes " +
           "are authenticated and that attached databases are not separately exposed.",
         stableElement: "public-ingress",
+      });
+    }
+
+    return findings;
+  },
+};
+
+/**
+ * A public load balancer that forwards internet traffic to a sensitive port on a backend
+ * the backend's own firewall admits.
+ *
+ * This is the effective-policy finding: it fires only when the frontend, the forwarding
+ * rule, and the backend firewall *collectively* open the path. A public HTTPS load balancer
+ * is fine; a backend firewall that trusts that load balancer on 5432 is fine; together they
+ * put PostgreSQL on the internet, and neither piece looks wrong on its own. Because it
+ * combines several provider facts (LB network, a forwarding rule, and one or more backend
+ * firewall rules), its confidence is `derived`, never `provider_reported`.
+ *
+ * The path must actually complete: if no backend firewall admits the target port -- from
+ * the load balancer or from the world -- the LB is forwarding into a closed door and no
+ * finding is raised. That is the calibration the specification asks for over "a sensitive
+ * port appears in a forwarding rule".
+ */
+export const loadBalancerSensitiveBackendPortRule: ExposureRule = {
+  kind: "load_balancer.sensitive_backend_port",
+  evaluate({ inventory, firewallsByDropletId }) {
+    const findings: DraftFinding[] = [];
+
+    for (const lb of inventory.loadBalancers) {
+      const network = lb.network?.toUpperCase();
+      const isPublic = network === "EXTERNAL" || (network !== "INTERNAL" && Boolean(lb.ip));
+      if (!isPublic) continue;
+
+      // Backends: explicit droplet ids plus tag-selected droplets, as the LB resolves them.
+      const backendIds = new Set<number>(lb.droplet_ids ?? []);
+      if (lb.tag) {
+        for (const droplet of inventory.droplets) {
+          if ((droplet.tags ?? []).includes(lb.tag)) backendIds.add(droplet.id);
+        }
+      }
+      if (backendIds.size === 0) continue;
+
+      const openPaths: Array<{
+        entryPort: number | null;
+        targetPort: number;
+        service: string;
+        reachableBackends: Array<{ dropletId: number; via: "public" | "load_balancer" }>;
+      }> = [];
+
+      for (const rule of lb.forwarding_rules ?? []) {
+        const targetPort = rule.target_port;
+        if (typeof targetPort !== "number") continue;
+        const service = SENSITIVE_PORTS.get(targetPort);
+        if (!service) continue; // only sensitive backend ports matter here
+
+        const reachableBackends: Array<{ dropletId: number; via: "public" | "load_balancer" }> = [];
+        for (const dropletId of backendIds) {
+          const firewalls = firewallsByDropletId.get(dropletId) ?? [];
+          const via = backendPortReachability(firewalls, targetPort, lb.id);
+          if (via) reachableBackends.push({ dropletId, via });
+        }
+
+        if (reachableBackends.length > 0) {
+          openPaths.push({ entryPort: rule.entry_port ?? null, targetPort, service, reachableBackends });
+        }
+      }
+
+      if (openPaths.length === 0) continue;
+
+      const services = [...new Set(openPaths.map((p) => p.service))];
+      // A sensitive service reachable from the internet: none-sensitivity resource (the LB)
+      // at sensitive-port reachability ⇒ high, from the same matrix the other rules use.
+      const derivation = deriveSeverity("none", "sensitive_ports");
+
+      findings.push({
+        resourceExternalId: externalId("loadBalancer", lb.id),
+        kind: "load_balancer.sensitive_backend_port",
+        severity: derivation.final,
+        // Combines the LB's public frontend, a forwarding rule, and a backend firewall rule
+        // -- more than one provider fact -- so it is derived, not provider_reported.
+        confidence: "derived",
+        provesInternetExposure: true,
+        title: `Load balancer exposes ${services.join(", ")} on a backend to the internet`,
+        summary:
+          `Load balancer "${lb.name}" is internet-facing and forwards to ${services.join(", ")} on ` +
+          `its backend(s), and the backend firewall admits that traffic, so the path from the ` +
+          `internet to the sensitive service completes. Each piece looks intentional alone; ` +
+          `together they place ${services.join(", ")} on the public internet.`,
+        evidence: {
+          ...severityEvidence("derived", derivation),
+          network: lb.network ?? null,
+          publicAddress: lb.ip || null,
+          paths: openPaths.map((p) => ({
+            entryPort: p.entryPort,
+            targetPort: p.targetPort,
+            service: p.service,
+            backends: p.reachableBackends.map((b) => ({
+              dropletExternalId: externalId("droplet", b.dropletId),
+              admittedVia: b.via === "public" ? "backend firewall allows 0.0.0.0/0" : "backend firewall trusts this load balancer",
+            })),
+          })),
+        },
+        remediation:
+          "Do not forward a sensitive service through a public load balancer. Remove the " +
+          "forwarding rule, or restrict the backend firewall so the port is reachable only " +
+          "from the specific private sources that need it -- not from the load balancer's " +
+          "public frontend.",
+        stableElement: openPaths
+          .map((p) => `${p.entryPort ?? "?"}->${p.targetPort}`)
+          .sort()
+          .join("|"),
+        // Genuinely multi-collector: the LB and its forwarding rules, the backend droplets,
+        // and their firewalls must all have been observed for this path to be trustworthy.
+        coverageKeys: ["load_balancers", "droplets", "firewalls"],
       });
     }
 

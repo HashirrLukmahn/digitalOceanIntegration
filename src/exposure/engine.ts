@@ -12,6 +12,7 @@ import {
   appPublicIngressRule,
   kubernetesPublicEndpointRule,
   loadBalancerPublicRule,
+  loadBalancerSensitiveBackendPortRule,
 } from "./rules/network";
 import {
   kubernetesAutoUpgradeDisabledRule,
@@ -32,6 +33,7 @@ export const RULES: readonly ExposureRule[] = [
   dropletNoFirewallRule,
   dropletOpenIngressRule,
   loadBalancerPublicRule,
+  loadBalancerSensitiveBackendPortRule,
   databasePublicNoTrustedSourcesRule,
   databaseTrustedSourceIsPublicRule,
   databaseVersionEndOfLifeRule,

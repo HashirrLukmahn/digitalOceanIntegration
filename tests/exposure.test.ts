@@ -14,7 +14,9 @@ import {
   appPublicIngressRule,
   kubernetesPublicEndpointRule,
   loadBalancerPublicRule,
+  loadBalancerSensitiveBackendPortRule,
 } from "../src/exposure/rules/network";
+import { backendPortReachability } from "../src/exposure/effective-policy";
 import {
   kubernetesAutoUpgradeDisabledRule,
   kubernetesUpgradeAvailableRule,
@@ -690,6 +692,99 @@ describe("certificate expiry", () => {
     expect(
       evalWith([{ id: "c7", type: "custom", state: "verified", not_after: "2030-01-01T00:00:00Z" }]),
     ).toEqual([]);
+  });
+});
+
+describe("effective firewall policy", () => {
+  const tcp = (ports: string, sources: Record<string, unknown>) => ({ protocol: "tcp", ports, sources });
+
+  it("reports load_balancer when a covering rule names the LB uid", () => {
+    const fw = { id: "f", name: "f", inbound_rules: [tcp("5432", { load_balancer_uids: ["lb-x"] })] };
+    expect(backendPortReachability([fw as never], 5432, "lb-x")).toBe("load_balancer");
+  });
+
+  it("reports public when a covering rule admits the whole internet", () => {
+    const fw = { id: "f", name: "f", inbound_rules: [tcp("5432", { addresses: ["0.0.0.0/0"] })] };
+    expect(backendPortReachability([fw as never], 5432, "lb-x")).toBe("public");
+  });
+
+  it("returns null when no covering rule admits the port", () => {
+    const fw = { id: "f", name: "f", inbound_rules: [tcp("443", { load_balancer_uids: ["lb-x"] })] };
+    expect(backendPortReachability([fw as never], 5432, "lb-x")).toBe(null);
+  });
+
+  it("ignores a UDP rule on the same number", () => {
+    const fw = { id: "f", name: "f", inbound_rules: [{ protocol: "udp", ports: "5432", sources: { load_balancer_uids: ["lb-x"] } }] };
+    expect(backendPortReachability([fw as never], 5432, "lb-x")).toBe(null);
+  });
+});
+
+describe("load balancer sensitive backend port", () => {
+  const backend = {
+    id: 501,
+    name: "db-node",
+    networks: { v4: [{ ip_address: "10.0.0.9", type: "private" }] },
+    tags: ["db"],
+  };
+  const publicLb = (over: Record<string, unknown> = {}) => ({
+    id: "lb-x",
+    name: "edge",
+    network: "EXTERNAL",
+    ip: "203.0.113.9",
+    droplet_ids: [501],
+    forwarding_rules: [{ entry_protocol: "tcp", entry_port: 5432, target_protocol: "tcp", target_port: 5432 }],
+    ...over,
+  });
+  const fwTrustingLb = {
+    id: "fw-db",
+    name: "db-fw",
+    droplet_ids: [501],
+    inbound_rules: [{ protocol: "tcp", ports: "5432", sources: { load_balancer_uids: ["lb-x"] } }],
+  };
+  const run = (inv: Record<string, unknown>) =>
+    loadBalancerSensitiveBackendPortRule.evaluate(buildContext(inventory(inv as never)));
+
+  it("fires when the LB, forwarding rule, and backend firewall collectively open the path", () => {
+    const [finding] = run({ droplets: [backend], firewalls: [fwTrustingLb], loadBalancers: [publicLb()] });
+    expect(finding!.kind).toBe("load_balancer.sensitive_backend_port");
+    expect(finding!.severity).toBe("high");
+    expect(finding!.confidence).toBe("derived");
+    expect(finding!.provesInternetExposure).toBe(true);
+    expect(finding!.coverageKeys).toEqual(["load_balancers", "droplets", "firewalls"]);
+    expect(finding!.resourceExternalId).toBe("do:loadbalancer:lb-x");
+  });
+
+  it("does NOT fire when the backend firewall blocks the target port (path incomplete)", () => {
+    const blocking = { ...fwTrustingLb, inbound_rules: [{ protocol: "tcp", ports: "443", sources: { load_balancer_uids: ["lb-x"] } }] };
+    expect(run({ droplets: [backend], firewalls: [blocking], loadBalancers: [publicLb()] })).toEqual([]);
+  });
+
+  it("does not fire for a forwarding rule to an ordinary web port", () => {
+    const webLb = publicLb({
+      forwarding_rules: [{ entry_protocol: "https", entry_port: 443, target_protocol: "http", target_port: 80 }],
+    });
+    const webFw = { ...fwTrustingLb, inbound_rules: [{ protocol: "tcp", ports: "80", sources: { load_balancer_uids: ["lb-x"] } }] };
+    expect(run({ droplets: [backend], firewalls: [webFw], loadBalancers: [webLb] })).toEqual([]);
+  });
+
+  it("does not fire for an internal load balancer", () => {
+    const internal = publicLb({ network: "INTERNAL" });
+    expect(run({ droplets: [backend], firewalls: [fwTrustingLb], loadBalancers: [internal] })).toEqual([]);
+  });
+
+  it("resolves tag-selected backends, not just explicit droplet ids", () => {
+    const taggedLb = publicLb({ droplet_ids: [], tag: "db" });
+    const [finding] = run({ droplets: [backend], firewalls: [fwTrustingLb], loadBalancers: [taggedLb] });
+    expect(finding).toBeDefined();
+  });
+
+  it("integrates through the engine and marks the load balancer internet-exposed", () => {
+    const result = evaluateExposure(
+      ACCOUNT,
+      inventory({ droplets: [backend as never], firewalls: [fwTrustingLb as never], loadBalancers: [publicLb() as never] }),
+    );
+    expect(result.findings.some((f) => f.kind === "load_balancer.sensitive_backend_port")).toBe(true);
+    expect(result.exposedResourceIds.has("do:loadbalancer:lb-x")).toBe(true);
   });
 });
 
