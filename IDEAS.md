@@ -204,6 +204,95 @@ measurement rather than a roadmap item.
 
 ---
 
+## 9. Identity and entitlement analysis, IdP-paired
+
+**Idea.** Add a *principal* to the graph — a team member, a token, a Spaces key, a
+service account — with `can-access` edges to the resources its scope actually reaches.
+The chain agent already traverses resource-to-resource edges; give it a principal as an
+entry point and the same traversal produces a blast radius: *this intern's full-access
+token reaches a `datastore`-sensitivity database it never otherwise touches*. Entitlement
+is the one axis the engine is missing — it already computes sensitivity, exposure, and
+reachability; who-can-touch-this is the fourth, and it is the one that names a person to
+hold liable.
+
+**Buys.** The Wiz-style contextual finding — not "this resource is exposed" but "this
+identity can reach that sensitive resource by this path" — with the highest-liability
+principal named. It reuses the existing engine rather than adding a second product: a
+principal is just a new kind of entry point for a traversal that already exists.
+
+**Why not a token checker first.** Considered and dropped as too rudimentary. Grading a
+single pasted token in isolation has a remediation identical to the advice given at
+connect time anyway (entry 1), and it produces no chain — just a label. The value is not
+"this token is over-scoped", it is "*this* principal reaches *that* sensitive resource by
+*this* path". That needs the principal in the graph, not a checker beside it.
+
+**The data problem, and the honest fallback.** DigitalOcean's API cannot enumerate
+tokens, their scopes, or team members' roles (see "Asked and answered", below), so the
+principal set cannot be discovered from DO. Manual upload is the fallback — a member
+list, a token inventory, a JSON of identity-to-grant — and it is consistent with how
+Spaces buckets are already handled (`SPACES_BUCKETS`, entry 5): when the API cannot see
+something, take explicit input rather than skip it silently.
+
+**The real move: pair with an IdP.** Identity lives in the identity provider — Okta,
+Entra ID, Google Workspace, JumpCloud — not in DigitalOcean. The IdP is the join key
+that turns "a full-access token" into "*Bob's* token, and Bob is an intern who left last
+month", which is the finding with liability attached. This is the CIEM pattern (cloud
+entitlement correlated with directory identity) and it is where the role-based-escalation
+story actually comes from; mechanism is SSO/SCIM directory sync. A CRM is **not** this —
+it holds customers, not employees or grants — and is rejected explicitly so it is not
+re-proposed.
+
+*SCIM's limit, stated plainly.* SCIM supplies the *identities and groups* — who exists,
+what team they are on — but it cannot map an **opaque DigitalOcean token to its owner or
+its grants**: DO exposes no token introspection (see "Asked and answered"), so nothing
+external can tell you which human minted a given PAT or what it can reach. The token↔owner
+and token↔grant links remain a **manual mapping** the customer supplies; the IdP only
+enriches the human side of a join the customer still has to make.
+
+**Costs.** A principal node type and `can-access` edge in the schema and `derive.ts`, an
+upload/ingest path, and — for the IdP phase — an OAuth app plus SCIM sync per provider,
+with the per-provider quirks that implies. The chain agent and `report_findings` are
+unchanged.
+
+**Sequence.** Manual upload first: it tells the whole most-liable-identity story for a
+demo and the first customers with no integration at all. IdP sync is the phase-2 scaling
+layer, valuable only once the manual finding is shown to land. Skip the standalone token
+checker entirely.
+
+**Trigger.** A customer asks "who can reach our sensitive data, and should they", or
+offboarding risk — a departed employee's credential still live — becomes the thing they
+actually fear. IdP integration specifically: when manual upload proves the finding and
+the bottleneck becomes keeping the principal set current by hand.
+
+---
+
+## 10. Memoized `ResourceGraph` for rules (tabled)
+
+**Idea.** Replace the ad-hoc `ExposureContext` (one hand-built index) with a richer graph
+object whose indices are memoized getters — `dropletsByTag`, `certificatesByLoadBalancer`,
+`ownedIps`, `publicDropletIds`, and so on — so a cross-resource rule reads the index it
+needs without recomputing anything and unused indices cost nothing.
+
+**Buys.** Ergonomics for cross-resource rules, and one obvious home for the graph the 2d
+visualization wants to render.
+
+**Costs.** A new abstraction (`src/exposure/graph.ts`) that every rule signature then
+depends on. The engine-hardening review judged it **not** foundational: the existing
+explicit rule registry with a small evaluation context — indexed resources, collector
+coverage, snapshot identity, `evaluatedAt` — is enough for the rules actually planned, and
+a general graph adds indirection before there is a second consumer to justify it.
+
+**Recommendation: table it.** Extending `ExposureContext` per-rule covers the near-term
+detections. Revisit if the 2d graph (or several rule consumers) genuinely needs one shared
+memoized structure — at which point the visualization layer and the rule engine reading the
+*same* object is the argument for building it, not rule ergonomics alone.
+
+**Trigger.** Two real consumers of the same graph — e.g. the attack-path rules **and** the
+`/graph` page — both wanting memoized cross-resource indices that the per-rule evaluation
+context cannot cheaply provide.
+
+---
+
 ## Asked and answered: not possible
 
 Recorded so they stop being re-proposed. Both were requested and neither is buildable
@@ -218,4 +307,5 @@ sprawl is invisible to the API; the control panel is the only place it exists.
 in the invitation request body. "Who has admin on this account" cannot be answered.
 
 Both would need DigitalOcean to ship new endpoints. Worth re-checking annually; worth
-assuming no in the meantime.
+assuming no in the meantime. Entry 9 routes around both by sourcing identity from an IdP
+or manual upload rather than from DigitalOcean — the API gap is why that entry exists.

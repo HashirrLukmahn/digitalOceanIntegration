@@ -89,36 +89,20 @@ fields to cover them.
 
 ## Part 1 — a more robust engine
 
-### 1a. Rule-plugin architecture (make contribution frictionless)
+### 1a. Rule contribution ergonomics (make adding a rule frictionless)
 
 **Goal:** a new detection is *one file* that declares what data it needs and returns
 findings, plus *one line* registering it. No contributor should touch the fingerprinting,
 severity, persistence, or context-building code to add a rule.
 
 **Design.** Keep the codebase's existing preference for explicit registration (mirrors
-the `COLLECTORS` array) — no filesystem magic. Three changes:
+the `COLLECTORS` array) — no filesystem magic. Rules evaluate against a **small explicit
+evaluation context** — indexed resources, collector coverage, snapshot identity, and an
+injected `evaluatedAt` — extending today's `ExposureContext`, not a general graph object.
+(A richer memoized `ResourceGraph` was considered and tabled — see `IDEAS.md` entry 10;
+adopt it only if visualization or several rule consumers later need it.) Two changes:
 
-1. **A richer, lazily-built `ResourceGraph` replaces the ad-hoc `ExposureContext`.**
-   Today `buildContext` computes exactly one index. Instead, build a graph object whose
-   indices are memoized getters, so a rule reads `graph.dropletsByTag` /
-   `graph.certificatesByLoadBalancer` / `graph.ownedPublicIps` /
-   `graph.databaseTrustedDropletIds` without recomputing anything, and unused indices
-   cost nothing. This is the single change that unblocks every cross-resource rule.
-
-   ```ts
-   // src/exposure/graph.ts (new)
-   export interface ResourceGraph {
-     inventory: RawInventory;
-     firewallsByDropletId: ReadonlyMap<number, DoFirewall[]>;   // exists today
-     dropletsByTag: ReadonlyMap<string, DoDroplet[]>;           // new
-     ownedIps: ReadonlySet<string>;                             // droplet public + reserved + LB IPs
-     certificatesByLoadBalancer: ReadonlyMap<string, DoCertificate[]>;
-     publicDropletIds: ReadonlySet<number>;                     // exposure primitive, shared
-     // … added as rules need them; each is a pure function of inventory
-   }
-   ```
-
-2. **A rule is self-describing.** Extend the rule contract with metadata so the registry,
+1. **A rule is self-describing.** Extend the rule contract with metadata so the registry,
    the UI, the coverage report, and the citation harness (2e) can all read it:
 
    ```ts
@@ -129,11 +113,11 @@ the `COLLECTORS` array) — no filesystem magic. Three changes:
      requires: readonly string[];       // e.g. ["certificates", "load_balancers"]
      /** DigitalOcean doc URL(s) justifying the rule. Enforced non-empty by a test. */
      references: readonly string[];
-     evaluate(graph: ResourceGraph): DraftFinding[];
+     evaluate(context: EvaluationContext): DraftFinding[];
    }
    ```
 
-3. **`DraftFinding` carries `references` too**, defaulting to the rule's. This is what
+2. **`DraftFinding` carries `references` too**, defaulting to the rule's. This is what
    makes "all sources cited" (2e) a structural guarantee rather than a promise: a finding
    literally cannot be persisted without the doc URL that backs it.
 
@@ -142,22 +126,23 @@ the `COLLECTORS` array) — no filesystem magic. Three changes:
 2. Add a collector to `src/do/collectors.ts` (or reuse one) and a fixture.
 3. Add `src/exposure/rules/<name>.ts` exporting a rule with `requires` + `references`.
 4. Register it in `src/exposure/rules/index.ts` (one line).
-5. Add a rule test from a literal graph.
+5. Add a rule test from a literal context.
 
-**Guardrails preserved:** rules stay pure functions of the graph (no I/O), so every
-finding remains reproducible from a stored snapshot and testable from a literal — the
-property `src/exposure/engine.ts` depends on.
+**Guardrails preserved:** rules stay pure functions of their evaluation context (no I/O),
+so a finding is deterministic for the same inputs and testable from a literal. This is
+**not** a claim that the persisted snapshot can replay findings: the snapshot stores
+normalized, allowlisted *output*, not the raw provider objects a rule reads (see "Store
+real point-in-time snapshots").
 
 ### 1b + 1c. New detections
 
-> **⚠️ Superseded in part by the [Evaluation addendum](#evaluation-addendum-2026-08-26).**
-> The catalogue below is the initial proposal. The addendum's **Rule revisions** table
-> revises or removes ~12 of these after a correctness review (notably:
-> `database.no_private_network` removed, DNS takeover downgraded to a low-confidence
-> heuristic, the plaintext-DB-URL attack path removed as it would require reading secret
-> *values*, egress demoted to context-only, DOKS EOL switched to the provider `upgrades`
-> endpoint). Where the two disagree, **the addendum wins.** Read this section for the
-> menu and rationale; read the addendum for the decisions actually being built.
+> **Reference menu — decisions live in the addendum's [Rule revisions](#rule-revisions).**
+> This section is retained for its per-rule fire conditions, severities, and DigitalOcean
+> doc citations. It is **not** a build list. The addendum's Rule revisions table is
+> authoritative and revises or removes ~12 of these (e.g. `database.no_private_network`
+> removed, DNS takeover downgraded to a low-confidence heuristic, the plaintext-DB-URL path
+> removed, egress demoted to context-only, DOKS EOL replaced by the provider `upgrades`
+> endpoint). **Build from the addendum; cite from here.**
 
 Grouped by product. Each rule lists: **fire condition**, **severity** (with the
 sensitivity × reachability reasoning where the matrix applies), whether it
@@ -285,7 +270,7 @@ inference. They belong in the engine (not only the LLM pass) because they are cl
 reproducible. They are new `category: "attack_path"` rules and each cites the DO
 networking semantics that permit the hop.
 
-Two shared primitives (built once in `ResourceGraph`, reused by every path):
+Two shared primitives (built once in the evaluation context, reused by every path):
 - `dropletIsInternetExposed(d, port)` = public IP present **and** (no attached firewall
   **or** an inbound rule opens `port` to `0.0.0.0/0`). Cloud firewalls are default-deny
   *only when attached* ([firewalls](https://docs.digitalocean.com/products/networking/firewalls/)).
@@ -328,18 +313,27 @@ clearly-labelled panel and is never persisted as verified evidence.
 `buildExport`). A reviewer cannot download the exact inventory + findings a specific
 historical sync produced.
 
-**Plan.**
+**Plan.** *(Revised — read the stored snapshot; timestamp reconstruction is withdrawn.
+See "Store real point-in-time snapshots" in the addendum.)*
 - Parameterize `buildExport` by `syncRunId` (default: latest, preserving today's
-  behaviour). Reconstruct the snapshot as of that run using the existing `first_seen_at`
-  / `last_seen_at` / `removed_at` / `resolved_at` columns — the history is already
-  recorded, only the read is missing.
+  behaviour). Read the append-only snapshot document written for that run. Do **not**
+  reconstruct state from `first_seen_at` / `last_seen_at` / `removed_at` / `resolved_at`:
+  those columns cannot recover prior resource JSON, relationships, severities, or evidence
+  once the rows are updated.
 - Add `GET /api/export?syncRunId=<id>` and a **Download JSON** button on each row of the
   `/syncs` page (and each history entry in the drawer).
-- Keep the exact `DigitalOceanSecurityExport` schema (`schemaVersion: "1"`) — it is the
-  one compatibility contract. Add `syncRunId` and the run's `status`/`coverage` to a
-  non-breaking `snapshot` sub-object so a downloaded file is self-describing.
-- Test: exporting run *N* never includes a resource whose `first_seen_at` is after run
-  *N*, nor omits one removed only after run *N*.
+- Keep the `DigitalOceanSecurityExport` schema **byte-for-byte v1** — its seven top-level
+  keys are the one compatibility contract, guarded by `tests/export.test.ts`. Do **not**
+  add a `snapshot` key to the envelope, and do **not** surface the `trusts` edge in the
+  exported `relationships` (whose enum is frozen at four values). Expose run identity
+  out-of-band instead: `syncRunId` / `status` / `coverage` ride in response headers and the
+  `Content-Disposition` filename (`do-export-<syncRunId>.json`). The self-describing run
+  metadata and the `trusts` edge live on the separate internal snapshot document (own
+  `snapshotVersion`), never in the evaluator-facing v1 envelope. (Carrying either in the
+  export is a future `schemaVersion: "2"` decision, out of scope here.)
+- Test: the export for run *N* still matches the frozen v1 shape (existing test unchanged),
+  and is built from the snapshot document persisted by run *N* rather than a mutable
+  current-state row.
 
 ### 2d. Visualize vulnerabilities & relationships
 
@@ -355,8 +349,10 @@ and the new attack-path rules are inherently a graph; a picture makes blast radi
   resource" is shown, not just described.
 - **Server-rendered, shareable, deterministic** — same discipline as the filters
   (`README.md`): the graph is derived from stored data with a stable layout seed, no
-  client-only state, so a URL reproduces a view. Data comes straight from the export
-  builder so the picture and the JSON can never disagree.
+  client-only state, so a URL reproduces a view. Data comes from the **internal snapshot
+  document**, not the v1 export envelope — the graph needs the `trusts` edge, which the
+  frozen export does not carry. Both derive from the same stored sync, so the picture and
+  the downloaded JSON never contradict on the resources and relationships they share.
 - Keep it honest: unassessed resources render with the existing dashed "not assessed"
   treatment; the graph must not imply completeness it doesn't have.
 - Library: a lightweight deterministic renderer (e.g. server-built graph → SVG, or a thin
@@ -371,8 +367,10 @@ that cannot point at its evidence and its fix does not ship.**
 **Deterministic findings.**
 - `references: string[]` becomes **required** on every rule (see 1a). A test asserts
   every registered rule declares at least one DigitalOcean doc URL, and every emitted
-  finding carries it into `evidence`/its own field. That is "all sources cited" as a
-  structural invariant.
+  finding carries it **inside the finding's `evidence` object** — the frozen v1 export's
+  `evidence: Record<string, unknown>` field — so citations ride the existing contract with
+  no new top-level key. A dedicated internal column is permitted only if the export builder
+  omits it, keeping v1 byte-for-byte. That is "all sources cited" as a structural invariant.
 - `remediation` is already required on `DraftFinding`; add a test that it is non-empty
   for every rule — "recommends required fixes," enforced.
 
@@ -419,21 +417,16 @@ visible coverage, never a lost one — the existing contract.
 
 ## Suggested phasing
 
-1. **Foundation (unblocks everything):** `ResourceGraph`, rule metadata
-   (`category`/`requires`/`references`), `references` on findings, the rule-registry doc.
-   No behaviour change; pure refactor with the existing 244 tests green.
-2. **High-value, low-risk single-resource rules:** certificates (+ collector),
-   `database.version_end_of_life`, `kubernetes.version_end_of_life`,
-   `load_balancer.http_no_redirect`, `image.public_shared`. Each is clean and citeable.
-3. **DNS + attack paths:** `domains`/`reserved_ips` collectors, `dns.*` rules, and the
-   deterministic `path.*` rules with the shared-VPC anti-overclaim test.
-4. **Remaining hardening rules:** egress, CORS, App Platform, DOKS hygiene, TLS posture.
-5. **Product/spec:** 2a (per-snapshot export), 2e (citation + grounding harness), then 2d
-   (graph visualization) last, since it consumes everything above.
+> **Superseded — see the addendum's [Revised implementation order](#revised-implementation-order).**
+> The original five-phase list here treated `ResourceGraph` as foundational and named a
+> `kubernetes.version_end_of_life` rule, both of which the addendum overturned. It is
+> removed so exactly one implementation order remains authoritative: the addendum's, which
+> is correctness-first (effective firewall policy, coverage-aware reconciliation, confidence
+> and exposure metadata, append-only snapshots) before any new rule ships.
 
 ## Testing additions
 
-- Every rule: fires and does-not-fire from a literal `ResourceGraph`; declares ≥1
+- Every rule: fires and does-not-fire from a literal evaluation context; declares ≥1
   reference; non-empty remediation.
 - The `ports:"0"` trap already exists — add an analogous **empty-`outbound_rules` =
   deny-all** trap for the egress rule.
@@ -614,10 +607,58 @@ existing tests stay green; individual rules opt into modifiers as their inputs
 reconstruct prior resource JSON, relationships, severities, or evidence after those rows
 are updated. Do not implement timestamp-based reconstruction as described earlier.
 
-Store one append-only, sanitized snapshot document per successful sync. Snapshot export,
-historical comparisons, agent validation, and visualization should all read from that
-same snapshot. Introduce versioned individual rows only if historical ad hoc querying
-later proves necessary.
+Store one append-only, sanitized snapshot document per run that updates current state —
+**including a `partial` run**, not only a fully successful one, since a partial run still
+mutates current state and its export must match what it wrote. Snapshot export, historical
+comparisons, agent validation, and visualization all read from that same document.
+Introduce versioned individual rows only if historical ad hoc querying later proves
+necessary.
+
+**It is the post-reconciliation account view, not just this run's observations.** A
+partial sync keeps last-known-good rows from a failed collector while replacing the
+datasets that succeeded (`src/sync/run.ts`). The snapshot must materialize that same merged
+current-state view — what the UI and tables show — so the three never diverge.
+
+Freshness is **per item, not just per portion**, and covers resources and relationships,
+not only findings. Every resource and every relationship (edge) in the snapshot carries
+**`coverageKeys: string[]` — every dataset its derivation depended on — not a single key**,
+plus whether it was **observed this run** or **retained from a prior run** because one of
+those collectors did not succeed. A derived edge routinely spans several datasets: a
+tag-based `trusts` edge depends on both `database_firewall:<clusterId>` and `droplets` (the
+tag is resolved to concrete Droplets), and a `depends_on` edge depends on `apps` and
+`databases`. An edge is live only when **all** of its `coverageKeys` are authoritative in
+the current sync; if any is stale the edge is retained-but-stale. Without this a reader
+cannot tell a live `trusts` edge from a stale one carried over from a failed
+database-firewall call, and an attack path could be asserted over an edge that no longer
+holds. The embedded coverage summary still marks which portions are fresh versus
+stale-but-retained versus not assessed;
+the per-item markers make the same distinction resolvable down to a single edge or resource.
+
+**It is an immutable evaluated-output document, not a replay input.** It stores normalized
+output — resources, relationships (including `trusts`), findings with evidence/confidence/
+severity derivation, and coverage — **not** the raw provider objects a rule read. It
+therefore cannot, and does not promise to, re-derive findings from scratch; adding
+sanitized evaluation inputs is a later step to take only if replay ever becomes a
+requirement.
+
+**Payload contract (required before this ships).** The document is an *allowlisted,
+versioned projection*, never the raw inventory:
+
+- **Allowlist, do not dump.** Reuse the existing metadata-allowlist discipline
+  (`src/normalize/metadata-allowlist.ts`): carry the same normalized fields the database
+  already stores, plus derived relationships, findings (with evidence, confidence, and the
+  severity derivation), and coverage. It **must never** copy an App Platform `spec` or any
+  GENERAL env var — those are returned in plaintext by `/v2/apps` (`src/do/types.ts`,
+  `DoAppEnvVar`), and persisting them would leak third-party credentials the collector path
+  deliberately refuses today.
+- **Versioned.** A `snapshotVersion` distinct from the export `schemaVersion`, so the
+  stored shape can evolve without touching the export compatibility contract.
+- **Self-describing.** Embed `syncRunId`, run `status`, and per-collector `coverage` (the
+  same keys used for finding coverage) so a reader tells assessed from not-assessed without
+  a second query.
+- **Atomic.** Written in the same transaction that updates current state, so a snapshot and
+  the rows it describes can never disagree, and a run failing mid-write leaves no partial
+  document.
 
 ### Rule revisions
 
@@ -625,7 +666,7 @@ later proves necessary.
 |---|---|
 | `database.version_end_of_life` | Keep. Prefer provider fields `version_end_of_life` and `version_end_of_availability` over a local lifecycle table. |
 | `database.no_private_network` | Remove as written. A cluster receives a default VPC when none is specified, and missing VPC data can be a permission/coverage issue. |
-| `kubernetes.version_end_of_life` | Replace with provider-reported available upgrades plus exact patch status. Avoid a hand-maintained minor-version table where the upgrades endpoint can answer the question. |
+| `kubernetes.version_end_of_life` | Rename to **`kubernetes.upgrade_available`**, driven by the provider `upgrades` endpoint (possible target versions, or `null`) plus exact patch status. An available upgrade does **not** prove the installed release is unsupported — make **no EOL/"unsupported" claim without explicit lifecycle evidence**; distinguish patch from minor upgrades, and note auto-upgrade covers patches only. No hand-maintained minor-version table. |
 | `kubernetes.auto_upgrade_disabled` | Keep, but state that auto-upgrade covers patches rather than minor-version upgrades. |
 | `kubernetes.public_workers` | Fire only when `isolated_workers` is explicitly `false`; absent is unknown. |
 | `dns.a_points_to_unowned_ip` | Do not call an external IP a takeover: external hosting is normal. Require evidence of a deallocated owned target or an active check; otherwise report a low-confidence stale-DNS heuristic. |
@@ -679,6 +720,22 @@ custom team roles, although not all role administration is exposed through API/C
 These checks may therefore remain declared manual attestations rather than automated
 findings.
 
+**Manual attestation is the floor, not the ceiling (deferred — see `IDEAS.md` entry 9).**
+The contemplated path past it: model a *principal* — team member, token, Spaces key,
+service account — as a first-class node with `can-access` edges, so the same
+deterministic traversal that powers the attack-path rules also produces an *entitlement*
+blast radius ("this token reaches that `datastore` cluster it never otherwise touches").
+Entitlement is the fourth axis the engine does not yet have; it already computes
+sensitivity, exposure, and reachability. Because DO's API cannot enumerate principals
+(the two identity rows in the Confirmed-blind-spots table), that node set would be
+sourced from manual upload first and an IdP/SCIM sync (Okta, Entra ID, Google Workspace)
+later — never from DigitalOcean, and never from a CRM. This is **out of scope for this
+plan** — which stays read-only, DO-API-grounded, and near-term — and is deliberately
+deferred. It is noted here only so the "remains manual" framing above is not read as
+"cannot ever be assessed," and because the `can-access` edge would extend the same
+relationship model (`src/relationships/derive.ts`) and graph visualization (2d) this plan
+already builds.
+
 Recent Kubernetes vulnerabilities also define an important collection boundary.
 IngressNightmare included unauthenticated ingress-nginx remote code execution, and DOKS
 later added worker-node metadata-service blocking in platform patches. Account-level
@@ -701,14 +758,20 @@ Validate agent findings against the selected stored snapshot, not merely against
 a resource appeared in any broad tool result. For every proposed path:
 
 1. The entry resource has a verified exposure finding.
-2. Every adjacent relationship exists in the snapshot.
+2. Each hop's `viaRelationship` edge exists in the snapshot, in the stated `viaDirection`,
+   between the previous node and this one, **and every key in that edge's `coverageKeys` is
+   authoritative in the run being validated** — a retained-but-stale edge is rejected, not
+   accepted merely because the row exists.
 3. The target has a deterministic sensitive-resource classification.
 4. Every cited `(resourceExternalId, findingKind)` pair exists.
 5. The agent run records the `syncRunId` or snapshot hash used for validation.
 
-Reuse `resourceExternalIds` as citations instead of adding a duplicate
-`citedResourceIds` field. LLM remediation is explanatory and clearly labeled as a
-suggestion; the deterministic rule's remediation remains authoritative.
+Cite via the ordered typed hops defined in *Contracts to pin before build* — each hop
+`{resourceExternalId, viaRelationship?, viaDirection?, findingKind?}` is itself the
+citation the validator checks, proving both the node and the edge that reached it — rather
+than a flat `resourceExternalIds` array or a duplicate `citedResourceIds` field. LLM
+remediation is explanatory and clearly labeled as a suggestion; the deterministic rule's
+remediation remains authoritative.
 
 ### Visualization decision
 
@@ -731,6 +794,105 @@ data such as severity distribution, evidence-confidence breakdown, collector cov
 or findings introduced/resolved over time. A full interactive node graph should wait
 until real accounts regularly produce paths complex enough that cards are insufficient.
 
+### Contracts to pin before build (review resolution, 2026-08-26)
+
+A correctness review found four places where an addendum requirement had no
+representation in the code it depends on. Each is a concrete contract for Phase 0 / Phase
+1 below, not a new feature. The storage-facing ones — the `trusts` relationship value, the
+finding `coverage_keys` column, and the per-run snapshot document — are declared in the
+canonical spec's *Internal schema extensions* section (`digitalocean-cloud-inventory.md`)
+as internal-only additions the frozen v1 export omits, so plan and spec agree.
+
+**Typed database-trust edge (`src/relationships/derive.ts`).** The `path.*` rules and the
+path cards render an "explicit trust edge", but the relationship model has only
+`contains | attached_to | routes_to | depends_on` — no trust. Add a `trusts`
+`RelationshipKind` derived from **database firewall trusted sources**. It is emphatically
+**not** DigitalOcean team membership, which `derive.ts` must still never read. It must
+represent every trusted-source form — Droplet, Kubernetes cluster, App, tag, exact IP, and
+IP/CIDR — with the two existing fields used correctly:
+
+- **`evidence` (the `provider_reported | derived` enum) reflects how the edge was
+  obtained, not the trust form.** A direct Droplet/App/Kubernetes trusted source is
+  `provider_reported`; a tag or CIDR that had to be *resolved* to the concrete resources it
+  currently matches is `derived` (membership can change, so the resolution is an inference).
+- **The trust form itself (`droplet` / `tag` / `ip` / `cidr` / …) and the raw matched
+  value go in `metadataJson`**, the free-form bag — never in the enum-valued `evidence`
+  field.
+
+One edge feeds both the deterministic `path.*` rules and the 2d graph, so trust has a
+single source of truth. It is **internal** — it lives in the relationships table, the
+snapshot, and the graph, but is **not** emitted in the frozen v1 export. Shared VPC
+membership is still **not** a trust edge; an explicitly trusted VPC CIDR is.
+
+**Per-finding coverage keys — and who produces them.** Rule-level `requires` is too coarse
+to reconcile safely: resolution today recovers a finding's resource *type* from its
+external id (`src/sync/run.ts`) and resolves as soon as that type is authoritative — even
+if a collector supporting another hop failed, and even though database firewalls are
+per-cluster child calls. Persist the **concrete coverage keys a finding actually depended
+on** on the finding row (e.g. `["droplets","firewalls","database_firewall:<clusterId>"]`)
+and resolve it only when **every** key is authoritative in the current sync.
+
+This needs a **producer contract**, because collectors currently return `void` and the
+orchestrator marks an entire collector authoritative by its static `resourceTypes`
+(`src/do/collectors.ts`, `src/sync/run.ts`). Give a collector a way to report the granular
+coverage keys it actually completed — the collector-name key for whole-dataset collectors,
+plus per-child keys like `database_firewall:<clusterId>` emitted as each child call
+succeeds (a collector that fetches five clusters' firewalls but fails the sixth reports
+five authoritative child keys, not the whole set). The sync run accumulates these
+authoritative keys into coverage; a rule records the subset it read as the finding's
+`coverageKeys`; and the snapshot's coverage carries the same key space, so reconciliation,
+findings, and snapshot all agree on what was authoritative. This replaces the type-only
+reconciliation for any finding that sets `coverageKeys`.
+
+**Derived relationships carry the same `coverageKeys: string[]`, for the same reason.** A
+derived edge routinely spans several datasets — a tag-based `trusts` edge depends on both
+`database_firewall:<clusterId>` and `droplets` (the tag is resolved to concrete Droplets), a
+`depends_on` edge on `apps` and `databases` — so a single key cannot describe its freshness.
+`deriveRelationships` records every dataset an edge read, and the agent accepts the edge only
+when **all** of those keys are authoritative in the run being validated (see *LLM grounding
+revision*, step 2); otherwise the edge is retained-but-stale and a path over it is rejected.
+
+**Structured agent citations.** `AgentFinding` and the `report_findings` tool schema store
+`resourceExternalIds` and `supportingFindingKinds` as two unrelated arrays, which cannot
+express the `(resourceExternalId, findingKind)` pairs the grounding validator checks — and
+even a paired form would only prove the *nodes*, never which edge the path claims to
+traverse between them. Replace both with an **ordered array of typed hops** that names the
+incoming edge:
+
+```typescript
+{
+  resourceExternalId: string;        // the node reached at this hop
+  viaRelationship?: RelationshipKind; // edge traversed to reach it (routes_to, trusts, …); absent on the entry hop
+  viaDirection?: "outbound" | "inbound"; // orientation of the stored edge relative to travel; absent on the entry hop
+  findingKind?: string;              // supporting rule finding at this node, if any
+}[]
+```
+
+**`viaDirection` has one fixed meaning, defined against the stored directed edge.** Every
+relationship row is stored as `source_external_id → target_external_id`. Relative to the
+previous hop's node:
+
+- `"outbound"` — the previous node is the edge's **`source`** and this hop's node is its
+  **`target`** (travel follows the edge's stored direction).
+- `"inbound"` — the previous node is the edge's **`target`** and this hop's node is its
+  **`source`** (travel is against the stored direction).
+
+The validator resolves the edge by `(previousNode, thisNode)` mapped to
+`(source, target)` per that rule, so the emitter and the validator can never disagree about
+which stored row a hop refers to. This is simultaneously the chain, the citations, and what
+the validator verifies hop-by-hop: the entry hop has no incoming edge (so `viaRelationship`
+and `viaDirection` are absent), and every later hop names an edge the validator confirms
+exists in the snapshot in the stated direction. (This is the hop the *LLM grounding
+revision* now cites.)
+
+**Required confidence and exposure.** `DraftFinding.confidence` and `provesInternetExposure`
+are optional today and exposure defaults to `true` (`src/exposure/types.ts`), so a
+non-exposure finding silently reads as internet-exposed unless a rule remembers to opt out.
+Make **both required**. A finding built from more than one provider fact (public IP *and*
+effective firewall policy) is `derived`, never `provider_reported`; reserve
+`provider_reported` for a single directly-stated field. Every rule already sets
+`confidence`, so this is a type change plus a test, not a migration.
+
 ### Revised implementation order
 
 1. **Correctness:** firewall actions/effective policy, coverage-aware execution and
@@ -746,8 +908,8 @@ until real accounts regularly produce paths complex enough that cards are insuff
 5. **Product presentation:** snapshot export and remediation/path cards first; trend
    charts and a full graph only after the underlying historical data and user need exist.
 
-The earlier generic `ResourceGraph` plugin design is optional rather than foundational.
-The existing explicit rule registry can use a small evaluation context containing
-indexed resources, collector coverage, snapshot identity, and `evaluatedAt`. Add a more
+The earlier generic `ResourceGraph` plugin design is tabled (see `IDEAS.md` entry 10),
+not foundational. The existing explicit rule registry can use a small evaluation context
+containing indexed resources, collector coverage, snapshot identity, and `evaluatedAt`. Add a more
 general graph abstraction only if multiple real consumers require behavior that this
 context cannot provide.

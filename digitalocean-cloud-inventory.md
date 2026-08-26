@@ -119,7 +119,7 @@ Provider-reported or deterministically derived resource relationships.
 | `account_id`         | text | Foreign key to `cloud_accounts`                         |
 | `source_external_id` | text | Source resource identifier                              |
 | `target_external_id` | text | Target resource identifier                              |
-| `relationship`       | text | `contains`, `attached_to`, `routes_to`, or `depends_on` |
+| `relationship`       | text | `contains`, `attached_to`, `routes_to`, `depends_on`, or internal `trusts` (see [Internal schema extensions](#internal-schema-extensions)) |
 | `evidence`           | text | `provider_reported` or `derived`                        |
 | `metadata_json`      | JSON | Evidence needed to explain the edge                     |
 
@@ -146,6 +146,38 @@ One row per actionable exposure, not one row per raw firewall rule.
 
 Fingerprint input: account, resource external ID, finding kind, and the stable
 configuration element that must be changed.
+
+A finding may also carry an internal `coverage_keys` column (see
+[Internal schema extensions](#internal-schema-extensions)); it is not part of the export.
+
+### Internal schema extensions
+
+The engine-hardening plan (`ENGINE-HARDENING-PLAN.md`) adds three storage-only extensions.
+They are **internal implementation detail**: the frozen v1 [JSON export](#json-export) below
+is the only compatibility contract, and it deliberately omits all three. They are recorded
+here so the schema tables above are not read as exhaustive.
+
+- **`trusts` relationship value.** `cloud_relationships.relationship` also accepts `trusts`,
+  derived from database firewall trusted sources — never from team membership. It powers the
+  attack-path rules and the graph. The trust *form* (`droplet` / `tag` / `ip` / `cidr` / …)
+  and raw matched value live in `metadata_json`, not in the enum-valued `evidence` column.
+  The v1 export's relationship enum stays `contains | attached_to | routes_to | depends_on`
+  and never emits `trusts`.
+- **`coverageKeys` on findings and edges.** A finding, and each snapshot relationship,
+  records **every** collector coverage key its derivation depended on — a `string[]`, not a
+  single key, because a derived edge routinely spans several datasets (a tag-based `trusts`
+  edge depends on both `database_firewall:<clusterId>` and `droplets`; a `depends_on` edge on
+  `apps` and `databases`). Reconciliation resolves a finding, and the agent accepts an edge,
+  only when **every** listed key was authoritative in the current sync — otherwise the item is
+  retained-but-stale. Internal; absent from the export.
+- **Per-run snapshot document.** One append-only, sanitized, versioned (`snapshotVersion`,
+  distinct from the export `schemaVersion`) snapshot per sync stores the post-reconciliation
+  account view — resources, relationships (including `trusts`, each with its `coverageKeys`
+  and observed-vs-retained freshness), findings with their evidence and severity derivation,
+  and coverage — for history, agent validation, and visualization.
+  It is a separate internal artifact, not the export envelope; a run's identity travels
+  out-of-band (response headers and the `Content-Disposition` filename), never as a new
+  top-level export key.
 
 ## Normalized resource contract
 
