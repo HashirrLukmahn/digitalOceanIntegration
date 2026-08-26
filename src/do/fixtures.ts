@@ -199,7 +199,14 @@ const FIXTURES: Record<string, unknown> = {
         redirect_http_to_https: true,
         droplet_ids: [101, 104],
         forwarding_rules: [
-          { entry_protocol: "https", entry_port: 443, target_protocol: "http", target_port: 80 },
+          {
+            entry_protocol: "https",
+            entry_port: 443,
+            target_protocol: "http",
+            target_port: 80,
+            // Binds the expired edge certificate to a public listener -> escalated finding.
+            certificate_id: "cert-edge",
+          },
           { entry_protocol: "http", entry_port: 80, target_protocol: "http", target_port: 80 },
         ],
       },
@@ -217,6 +224,35 @@ const FIXTURES: Record<string, unknown> = {
         forwarding_rules: [
           { entry_protocol: "http", entry_port: 8080, target_protocol: "http", target_port: 8080 },
         ],
+      },
+    ],
+    links: { pages: {} },
+  },
+
+  "/v2/certificates": {
+    certificates: [
+      {
+        // Custom certificate, already expired, and bound to the public edge load balancer
+        // -> escalated to high. Uses a fixed past date so it is expired at any run time.
+        id: "cert-edge",
+        name: "prod-edge-cert",
+        type: "custom",
+        state: "verified",
+        not_after: "2025-01-01T00:00:00Z",
+        sha1_fingerprint: "aa:bb:cc",
+        dns_names: ["shop.acme.example"],
+        created_at: "2023-01-01T00:00:00Z",
+      },
+      {
+        // Healthy Let's Encrypt certificate far from expiry -> auto-renews, no finding.
+        id: "cert-le",
+        name: "api-le-cert",
+        type: "lets_encrypt",
+        state: "verified",
+        not_after: "2030-01-01T00:00:00Z",
+        sha1_fingerprint: "dd:ee:ff",
+        dns_names: ["api.acme.example"],
+        created_at: "2025-06-01T00:00:00Z",
       },
     ],
     links: { pages: {} },
@@ -342,9 +378,12 @@ const FIXTURES: Record<string, unknown> = {
         tags: [],
         created_at: "2024-02-02T00:00:00Z",
         status: { state: "running" },
-        // null: the invite-only field is unavailable on this account. Must produce
-        // NO finding -- "cannot tell" is not "unrestricted".
+        // null: the invite-only field is unavailable on this account. Must produce NO
+        // control-plane finding -- "cannot tell" is not "unrestricted".
         control_plane_firewall: null,
+        // Auto-upgrade explicitly off -> a low-severity patch-hygiene finding. This is the
+        // only finding this cluster produces, and it does not mark the cluster exposed.
+        auto_upgrade: false,
         node_pools: [],
       },
     ],

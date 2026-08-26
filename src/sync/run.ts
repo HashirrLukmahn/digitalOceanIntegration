@@ -158,7 +158,7 @@ export async function runSync(options: SyncOptions): Promise<SyncResult> {
   // --- 3. Normalize, relate, evaluate --------------------------------------------
   const resources = normalizeInventory(inventory);
   const relationships = deriveRelationships(inventory);
-  const exposure = evaluateExposure(accountId, inventory);
+  const exposure = evaluateExposure(accountId, inventory, undefined, startedAt);
 
   for (const resource of resources) {
     resource.isInternetExposed = exposure.exposedResourceIds.has(resource.externalId);

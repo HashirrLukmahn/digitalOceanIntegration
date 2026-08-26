@@ -1,7 +1,16 @@
 import { externalId } from "../../normalize/resource";
 import { isPublicInternetCidr } from "../ports";
-import { deriveSeverity, severityEvidence } from "../severity";
+import { deriveSeverity, severityEvidence, type Severity } from "../severity";
 import type { DraftFinding, ExposureRule } from "../types";
+
+/** Parse a provider `YYYY-MM-DD` lifecycle date to a Date, or null if absent/malformed. */
+function parseLifecycleDate(value: string | undefined): Date | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+const DAY_MS = 86_400_000;
 
 /**
  * Managed database exposure.
@@ -67,6 +76,90 @@ export const databasePublicNoTrustedSourcesRule: ExposureRule = {
         // reconciles only when both were authoritative -- an empty trusted-source list is
         // only meaningful if the firewall call actually succeeded.
         coverageKeys: ["databases", `database_firewall:${cluster.id}`],
+      });
+    }
+
+    return findings;
+  },
+};
+
+/**
+ * A managed database running an engine version at or near end of life.
+ *
+ * Entirely provider-reported: DigitalOcean returns `version_end_of_life` (patches stop)
+ * and `version_end_of_availability` (no new clusters) per cluster, so there is no
+ * hand-maintained lifecycle table to drift out of date. Severity tiers by urgency:
+ *
+ *   past end of life        high    -- the version no longer receives security patches
+ *   end of life <= 90 days  medium  -- imminent; schedule the upgrade now
+ *   end of availability due  low     -- still supported, but plan a move off the version
+ *
+ * This is a lifecycle/patch-hygiene finding, not a reachability one, so it never marks the
+ * cluster internet-exposed; a separate rule decides whether the cluster is reachable.
+ */
+export const databaseVersionEndOfLifeRule: ExposureRule = {
+  kind: "database.version_end_of_life",
+  evaluate({ inventory, now }) {
+    const findings: DraftFinding[] = [];
+    const nowMs = now.getTime();
+
+    for (const cluster of inventory.databases) {
+      const eol = parseLifecycleDate(cluster.version_end_of_life);
+      const eoa = parseLifecycleDate(cluster.version_end_of_availability);
+      if (!eol && !eoa) continue;
+
+      const isPast = (date: Date | null) => date !== null && date.getTime() <= nowMs;
+      const withinDays = (date: Date | null, days: number) =>
+        date !== null && date.getTime() > nowMs && date.getTime() - nowMs <= days * DAY_MS;
+
+      let severity: Severity;
+      let situation: string;
+      if (isPast(eol)) {
+        severity = "high";
+        situation = `reached end of life on ${cluster.version_end_of_life} and no longer receives security patches`;
+      } else if (withinDays(eol, 90)) {
+        severity = "medium";
+        situation = `reaches end of life on ${cluster.version_end_of_life}, within 90 days`;
+      } else if (isPast(eoa) || withinDays(eoa, 90)) {
+        severity = "low";
+        situation = `has reached or is nearing end of availability (${cluster.version_end_of_availability}); it is still supported, but plan an upgrade`;
+      } else {
+        continue; // dates exist but are comfortably in the future
+      }
+
+      const engine = cluster.engine ?? "unknown engine";
+      findings.push({
+        resourceExternalId: externalId("database", cluster.id),
+        kind: "database.version_end_of_life",
+        severity,
+        confidence: "provider_reported",
+        provesInternetExposure: false,
+        title: `Managed database runs an ${severity === "low" ? "aging" : "end-of-life"} engine version`,
+        summary:
+          `Database cluster "${cluster.name}" runs ${engine} ${cluster.version ?? "?"}, which ` +
+          `${situation}. Running an unsupported engine version means security fixes are no ` +
+          `longer applied, so schedule an in-place upgrade to a supported version.`,
+        evidence: {
+          confidence: "provider_reported",
+          severityRationale: {
+            base: severity,
+            modifiers: [],
+            final: severity,
+            formula: `engine version lifecycle: ${situation} ⇒ ${severity}`,
+          },
+          engine: cluster.engine ?? null,
+          version: cluster.version ?? null,
+          versionEndOfLife: cluster.version_end_of_life ?? null,
+          versionEndOfAvailability: cluster.version_end_of_availability ?? null,
+        },
+        remediation:
+          "Upgrade the cluster to a supported engine version in the DigitalOcean control " +
+          "panel or via the API. Test against the target version first; major-version " +
+          "upgrades can require application changes.",
+        // One ongoing finding per cluster: as the situation escalates from low to high the
+        // same finding is updated in place, preserving first_seen_at.
+        stableElement: "version-lifecycle",
+        coverageKeys: ["databases"],
       });
     }
 

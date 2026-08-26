@@ -3,14 +3,17 @@ import { bySeverityDescending } from "./severity";
 import {
   databasePublicNoTrustedSourcesRule,
   databaseTrustedSourceIsPublicRule,
+  databaseVersionEndOfLifeRule,
 } from "./rules/database";
 import { appPlaintextSecretEnvRule } from "./rules/app-secrets";
+import { certificateExpiringRule } from "./rules/certificate";
 import { dropletNoFirewallRule, dropletOpenIngressRule } from "./rules/droplet";
 import {
   appPublicIngressRule,
   kubernetesPublicEndpointRule,
   loadBalancerPublicRule,
 } from "./rules/network";
+import { kubernetesAutoUpgradeDisabledRule } from "./rules/kubernetes";
 import { spacePublicReadRule } from "./rules/space";
 import { buildContext, fingerprint, type DraftFinding, type ExposureRule } from "./types";
 
@@ -28,9 +31,12 @@ export const RULES: readonly ExposureRule[] = [
   loadBalancerPublicRule,
   databasePublicNoTrustedSourcesRule,
   databaseTrustedSourceIsPublicRule,
+  databaseVersionEndOfLifeRule,
   kubernetesPublicEndpointRule,
+  kubernetesAutoUpgradeDisabledRule,
   appPublicIngressRule,
   appPlaintextSecretEnvRule,
+  certificateExpiringRule,
   spacePublicReadRule,
 ];
 
@@ -49,8 +55,9 @@ export function evaluateExposure(
   accountId: string,
   inventory: RawInventory,
   rules: readonly ExposureRule[] = RULES,
+  now: Date = new Date(),
 ): ExposureResult {
-  const context = buildContext(inventory);
+  const context = buildContext(inventory, now);
   const findings: EvaluatedFinding[] = [];
   const seen = new Set<string>();
 

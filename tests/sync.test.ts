@@ -125,14 +125,24 @@ describe("sync against the fixture account", () => {
     expect(byResource.has("do:dbaas:db-orders")).toBe(false);
 
     // Control-plane firewall explicitly disabled fires; restricted and null do not.
+    expect(byResource.get("do:kubernetes:k8s-prod")?.kind).toBe("kubernetes.public_control_plane");
     expect(byResource.get("do:kubernetes:k8s-prod")?.severity).toBe("medium");
     expect(byResource.has("do:kubernetes:k8s-staging")).toBe(false);
-    expect(byResource.has("do:kubernetes:k8s-legacy")).toBe(false);
+    // k8s-legacy has a null control-plane firewall (no finding there) but auto-upgrade is
+    // explicitly off, so its only finding is the low-severity patch-hygiene one.
+    expect(byResource.get("do:kubernetes:k8s-legacy")?.kind).toBe("kubernetes.auto_upgrade_disabled");
+    expect(byResource.get("do:kubernetes:k8s-legacy")?.severity).toBe("low");
 
     // Public edge load balancer and public app are recorded, but calibrated low.
     expect(byResource.get("do:loadbalancer:lb-public")?.severity).toBe("low");
     expect(byResource.has("do:loadbalancer:lb-internal")).toBe(false);
     expect(byResource.get("do:app:app-storefront")?.severity).toBe("low");
+
+    // The expired edge certificate, bound to the public load balancer, is high; the healthy
+    // Let's Encrypt certificate produces nothing.
+    expect(byResource.get("do:certificate:cert-edge")?.kind).toBe("certificate.expiring");
+    expect(byResource.get("do:certificate:cert-edge")?.severity).toBe("high");
+    expect(byResource.has("do:certificate:cert-le")).toBe(false);
   });
 
   it("marks exactly the resources that have findings as internet-exposed", async () => {

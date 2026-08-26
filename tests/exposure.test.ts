@@ -8,12 +8,15 @@ import { dropletNoFirewallRule, dropletOpenIngressRule } from "../src/exposure/r
 import {
   databasePublicNoTrustedSourcesRule,
   databaseTrustedSourceIsPublicRule,
+  databaseVersionEndOfLifeRule,
 } from "../src/exposure/rules/database";
 import {
   appPublicIngressRule,
   kubernetesPublicEndpointRule,
   loadBalancerPublicRule,
 } from "../src/exposure/rules/network";
+import { kubernetesAutoUpgradeDisabledRule } from "../src/exposure/rules/kubernetes";
+import { certificateExpiringRule } from "../src/exposure/rules/certificate";
 
 const ACCOUNT = "acct-1";
 
@@ -509,6 +512,141 @@ describe("fingerprint stability", () => {
     expect(fingerprint(ACCOUNT, { ...draft, resourceExternalId: "do:droplet:2" })).not.toBe(
       fingerprint(ACCOUNT, draft),
     );
+  });
+});
+
+describe("database version lifecycle", () => {
+  const NOW = new Date("2026-08-26T00:00:00.000Z");
+  const evalWith = (cluster: Record<string, unknown>) =>
+    databaseVersionEndOfLifeRule.evaluate(buildContext(inventory({ databases: [cluster as never] }), NOW));
+
+  it("flags a past end-of-life version as high, without marking it internet-exposed", () => {
+    const [finding] = evalWith({
+      id: "db-1",
+      name: "pg",
+      engine: "pg",
+      version: "11",
+      version_end_of_life: "2024-11-09",
+    });
+    expect(finding!.severity).toBe("high");
+    expect(finding!.confidence).toBe("provider_reported");
+    expect(finding!.provesInternetExposure).toBe(false);
+    expect(finding!.coverageKeys).toEqual(["databases"]);
+  });
+
+  it("flags an end-of-life within 90 days as medium", () => {
+    const [finding] = evalWith({
+      id: "db-2",
+      name: "mysql",
+      engine: "mysql",
+      version: "8",
+      version_end_of_life: "2026-10-01", // ~36 days out
+    });
+    expect(finding!.severity).toBe("medium");
+  });
+
+  it("treats end-of-availability with a future end-of-life as low", () => {
+    const [finding] = evalWith({
+      id: "db-3",
+      name: "pg",
+      engine: "pg",
+      version: "13",
+      version_end_of_availability: "2026-01-01", // past
+      version_end_of_life: "2027-11-09", // comfortably future
+    });
+    expect(finding!.severity).toBe("low");
+  });
+
+  it("says nothing when the lifecycle dates are comfortably in the future", () => {
+    expect(
+      evalWith({ id: "db-4", name: "pg", version_end_of_life: "2029-01-01" }),
+    ).toEqual([]);
+  });
+
+  it("says nothing when the provider reports no lifecycle dates", () => {
+    expect(evalWith({ id: "db-5", name: "pg", engine: "pg", version: "16" })).toEqual([]);
+  });
+});
+
+describe("kubernetes auto-upgrade posture", () => {
+  const evalWith = (cluster: Record<string, unknown>) =>
+    kubernetesAutoUpgradeDisabledRule.evaluate(buildContext(inventory({ kubernetes: [cluster as never] })));
+
+  it("fires only when auto_upgrade is explicitly false", () => {
+    const [finding] = evalWith({ id: "k1", name: "prod", auto_upgrade: false });
+    expect(finding!.kind).toBe("kubernetes.auto_upgrade_disabled");
+    expect(finding!.severity).toBe("low");
+    expect(finding!.provesInternetExposure).toBe(false);
+  });
+
+  it("stays silent when auto_upgrade is enabled", () => {
+    expect(evalWith({ id: "k2", name: "prod", auto_upgrade: true })).toEqual([]);
+  });
+
+  it("treats an absent auto_upgrade as unknown, not disabled", () => {
+    expect(evalWith({ id: "k3", name: "prod" })).toEqual([]);
+  });
+});
+
+describe("certificate expiry", () => {
+  const NOW = new Date("2026-08-26T00:00:00.000Z");
+  const publicLbWithCert = (certId: string) => ({
+    id: "lb-1",
+    name: "edge",
+    network: "EXTERNAL",
+    ip: "203.0.113.5",
+    forwarding_rules: [{ entry_protocol: "https", entry_port: 443, certificate_id: certId }],
+  });
+  const evalWith = (certs: Record<string, unknown>[], loadBalancers: Record<string, unknown>[] = []) =>
+    certificateExpiringRule.evaluate(
+      buildContext(inventory({ certificates: certs as never, loadBalancers: loadBalancers as never }), NOW),
+    );
+
+  it("escalates an expired certificate bound to a public endpoint to high", () => {
+    const [finding] = evalWith(
+      [{ id: "c1", name: "edge", type: "custom", state: "verified", not_after: "2025-01-01T00:00:00Z" }],
+      [publicLbWithCert("c1")],
+    );
+    expect(finding!.severity).toBe("high");
+    expect(finding!.provesInternetExposure).toBe(false);
+    expect(finding!.coverageKeys).toEqual(["certificates", "load_balancers"]);
+    // Explicitly disclaims interception rather than claiming a MITM.
+    expect(finding!.summary).toMatch(/not by itself prove interception/i);
+  });
+
+  it("reports an expired but unbound certificate at a lower severity", () => {
+    const [finding] = evalWith([
+      { id: "c2", name: "orphan", type: "custom", state: "verified", not_after: "2025-01-01T00:00:00Z" },
+    ]);
+    expect(finding!.severity).toBe("medium");
+  });
+
+  it("flags a custom certificate expiring within the window as low when unbound", () => {
+    const [finding] = evalWith([
+      { id: "c3", name: "soon", type: "custom", state: "verified", not_after: "2026-09-10T00:00:00Z" },
+    ]);
+    expect(finding!.severity).toBe("low");
+  });
+
+  it("stays silent for a healthy auto-renewing Let's Encrypt certificate near expiry", () => {
+    expect(
+      evalWith([{ id: "c4", type: "lets_encrypt", state: "verified", not_after: "2026-09-01T00:00:00Z" }]),
+    ).toEqual([]);
+  });
+
+  it("still flags a Let's Encrypt certificate that has actually expired or errored", () => {
+    expect(
+      evalWith([{ id: "c5", type: "lets_encrypt", state: "verified", not_after: "2025-01-01T00:00:00Z" }]),
+    ).toHaveLength(1);
+    expect(
+      evalWith([{ id: "c6", type: "lets_encrypt", state: "error", not_after: "2030-01-01T00:00:00Z" }]),
+    ).toHaveLength(1);
+  });
+
+  it("says nothing about a healthy custom certificate far from expiry", () => {
+    expect(
+      evalWith([{ id: "c7", type: "custom", state: "verified", not_after: "2030-01-01T00:00:00Z" }]),
+    ).toEqual([]);
   });
 });
 

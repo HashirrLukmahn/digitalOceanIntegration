@@ -127,6 +127,8 @@ export interface DoForwardingRule {
   target_protocol?: string;
   target_port?: number;
   tls_passthrough?: boolean;
+  /** The certificate bound to this listener, when the entry protocol terminates TLS. */
+  certificate_id?: string;
 }
 
 export interface DoLoadBalancer {
@@ -183,6 +185,14 @@ export interface DoDatabaseCluster {
   private_network_uuid?: string;
   connection?: DoDatabaseConnection;
   private_connection?: DoDatabaseConnection;
+  /**
+   * Lifecycle dates DigitalOcean returns for the engine version, as `YYYY-MM-DD`.
+   * `version_end_of_life` is when the version stops receiving security patches;
+   * `version_end_of_availability` is when new clusters can no longer be created on it.
+   * Both are provider-reported, so a lifecycle finding needs no hand-maintained table.
+   */
+  version_end_of_life?: string;
+  version_end_of_availability?: string;
 }
 
 /**
@@ -203,6 +213,25 @@ export interface DoDatabaseFirewallRule {
  * availability. `null` means "we cannot tell", NOT "unrestricted" -- treating it as
  * unrestricted would raise a finding on essentially every real cluster.
  */
+/**
+ * A managed TLS certificate.
+ *
+ * The API returns only public material -- there is no private key here, and there must
+ * never be. `not_after` is the expiry instant; `type` is `custom` or `lets_encrypt`
+ * (Let's Encrypt certificates auto-renew, which the rule takes into account); `state` is
+ * `verified`, `pending`, or `error`.
+ */
+export interface DoCertificate {
+  id: string;
+  name?: string;
+  not_after?: string;
+  sha1_fingerprint?: string;
+  dns_names?: string[];
+  type?: "custom" | "lets_encrypt" | string;
+  state?: "verified" | "pending" | "error" | string;
+  created_at?: string;
+}
+
 export interface DoControlPlaneFirewall {
   enabled?: boolean;
   allowed_addresses?: string[];
@@ -222,6 +251,12 @@ export interface DoKubernetesCluster {
   status?: { state?: string; message?: string };
   control_plane_firewall?: DoControlPlaneFirewall | null;
   node_pools?: Array<{ id?: string; name?: string; count?: number; size?: string }>;
+  /**
+   * Whether DigitalOcean auto-applies **patch** upgrades to the cluster. It does not cover
+   * minor-version upgrades, which always remain a manual, provider-reported action.
+   * Optional because older API responses may omit it: absent means "unknown", not "off".
+   */
+  auto_upgrade?: boolean;
 }
 
 export interface DoAppSpecDatabase {

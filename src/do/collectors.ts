@@ -15,6 +15,7 @@ import {
 import type {
   DoAccountResponse,
   DoApp,
+  DoCertificate,
   DoDatabaseCluster,
   DoDatabaseFirewallRule,
   DoDroplet,
@@ -57,6 +58,7 @@ export interface RawInventory {
   apps: DoApp[];
   volumes: DoVolume[];
   registries: DoRegistry[];
+  certificates: DoCertificate[];
   /** Anonymous public-read probes for configured Spaces buckets. */
   spaces: BucketProbe[];
   /** Which Spaces capability was available this run. Surfaced in coverage. */
@@ -77,6 +79,7 @@ export function emptyInventory(): RawInventory {
     apps: [],
     volumes: [],
     registries: [],
+    certificates: [],
     spaces: [],
     spacesMode: "unavailable",
   };
@@ -271,6 +274,19 @@ export const volumesCollector: Collector = {
   },
 };
 
+export const certificatesCollector: Collector = {
+  name: "certificates",
+  required: false,
+  resourceTypes: ["digitalocean.certificate"],
+  async run(http, inventory) {
+    inventory.certificates = await collectPaged<DoCertificate>(
+      http,
+      "/v2/certificates",
+      pick("certificates"),
+    );
+  },
+};
+
 export const registriesCollector: Collector = {
   name: "container_registries",
   required: false,
@@ -368,5 +384,6 @@ export const COLLECTORS: readonly Collector[] = [
   appsCollector,
   volumesCollector,
   registriesCollector,
+  certificatesCollector,
   spacesCollector,
 ];

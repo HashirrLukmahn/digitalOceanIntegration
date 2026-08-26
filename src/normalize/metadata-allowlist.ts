@@ -25,6 +25,10 @@ export const METADATA_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
   "digitalocean.app": ["created_at", "updated_at"],
   "digitalocean.container_registry": ["created_at", "storage_usage_bytes"],
   "digitalocean.volume": ["size_gigabytes", "filesystem_type", "created_at"],
+  // `not_after` and `type` are copied via computed metadata in normalizeCertificate; the
+  // allowlist keeps only the plainly-safe descriptive keys. `sha1_fingerprint` is a public
+  // identifier, not a secret.
+  "digitalocean.certificate": ["state", "not_after", "sha1_fingerprint", "dns_names", "created_at"],
   "digitalocean.space": [],
 };
 

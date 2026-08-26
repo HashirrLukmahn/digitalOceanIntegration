@@ -2,6 +2,7 @@ import type { RawInventory } from "../do/collectors";
 import type { BucketProbe } from "../do/spaces";
 import type {
   DoApp,
+  DoCertificate,
   DoDatabaseCluster,
   DoDroplet,
   DoFirewall,
@@ -62,6 +63,7 @@ export const TYPE_TABLE = {
     sensitivity: "credential",
   },
   volume: { type: "digitalocean.volume", urn: "volume", sensitivity: "datastore" },
+  certificate: { type: "digitalocean.certificate", urn: "certificate", sensitivity: "none" },
 } as const satisfies Record<string, { type: string; urn: string; sensitivity: Sensitivity }>;
 
 export type TypeKey = keyof typeof TYPE_TABLE;
@@ -276,6 +278,18 @@ export function normalizeSpace(probe: BucketProbe): CloudResource {
   });
 }
 
+export function normalizeCertificate(cert: DoCertificate): CloudResource {
+  return base("certificate", cert.id, cert.name ?? cert.id, {
+    state: cert.state ?? null,
+    raw: cert as unknown as Record<string, unknown>,
+    computed: {
+      not_after: cert.not_after,
+      cert_type: cert.type,
+      dns_name_count: cert.dns_names?.length ?? 0,
+    },
+  });
+}
+
 /** Normalize an entire raw inventory. Order is stable for reproducible exports. */
 export function normalizeInventory(inventory: RawInventory): CloudResource[] {
   return [
@@ -289,6 +303,7 @@ export function normalizeInventory(inventory: RawInventory): CloudResource[] {
     ...inventory.apps.map(normalizeApp),
     ...inventory.volumes.map(normalizeVolume),
     ...inventory.registries.map(normalizeRegistry),
+    ...inventory.certificates.map(normalizeCertificate),
     ...inventory.spaces.map(normalizeSpace),
   ];
 }
