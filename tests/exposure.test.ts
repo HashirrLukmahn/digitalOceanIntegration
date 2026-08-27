@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { emptyInventory, type RawInventory } from "../src/do/collectors";
 import { evaluateExposure, PATH_RULES, RULES } from "../src/exposure/engine";
+import { RULE_CATALOGUE } from "../src/exposure/catalogue";
 import { describePorts, isPublicInternetCidr, parsePorts } from "../src/exposure/ports";
 import { calibrateSeverity } from "../src/exposure/severity";
 import { buildContext, fingerprint, indexFirewallsByDroplet } from "../src/exposure/types";
@@ -1011,6 +1012,15 @@ describe("rule contract", () => {
         expect(url).toMatch(/^https:\/\/docs\.digitalocean\.com\//);
       }
     }
+  });
+
+  it("the rule catalogue matches the registry exactly (no drift)", () => {
+    const registered = [...RULES, ...PATH_RULES].map((r) => r.kind).sort();
+    const catalogued = RULE_CATALOGUE.map((e) => e.kind).sort();
+    // Every rule is described in the catalogue, and nothing lingers that is no longer a rule.
+    expect(catalogued).toEqual(registered);
+    // No duplicate catalogue entries.
+    expect(new Set(catalogued).size).toBe(catalogued.length);
   });
 });
 

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { SyncCoverage } from "../src/db/schema";
+import { catalogueByGroup, RULE_CATALOGUE } from "../src/exposure/catalogue";
 import { dataSource, digitalOceanToken } from "../src/lib/env";
 
 /**
@@ -112,6 +113,52 @@ export function SeverityLegend() {
         evidence is provider-reported, derived, actively probed, or a heuristic — is shown on
         each finding and never changes the level: a heuristic is presented as a heuristic, not
         dressed up as a verified critical.
+      </p>
+    </details>
+  );
+}
+
+/**
+ * What the rule engine checks.
+ *
+ * A companion to the severity legend: the severity legend explains *how* a finding is
+ * graded, this explains *what gets flagged in the first place*. It renders the rule
+ * catalogue grouped by resource family, so the team can see the engine's coverage at a
+ * glance -- and it stays complete because a test ties the catalogue to the rule registry.
+ */
+export function RuleLegend() {
+  const groups = catalogueByGroup();
+
+  return (
+    <details className="panel px-4 py-3">
+      <summary className="cursor-pointer list-none text-sm font-medium">
+        What the rule engine checks
+        <span className="ml-2 text-[0.78rem] font-normal text-muted">
+          {RULE_CATALOGUE.length} deterministic rules — click to expand
+        </span>
+      </summary>
+
+      <div className="mt-3 grid gap-x-8 gap-y-4 sm:grid-cols-2">
+        {groups.map((group) => (
+          <div key={group.group}>
+            <div className="eyebrow mb-1.5">{group.group}</div>
+            <ul className="space-y-2">
+              {group.entries.map((entry) => (
+                <li key={entry.kind}>
+                  <div className="text-[0.82rem] leading-snug text-ink">{entry.title}</div>
+                  <div className="font-mono text-[0.68rem] text-faint">{entry.kind}</div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+
+      <p className="mt-3 text-[0.78rem] leading-relaxed text-muted">
+        The last group is cross-resource: each individual piece can look correctly
+        configured, and only the <span className="text-ink">combination</span> is the breach.
+        A rule fires only when it can prove the problem from the provider data, and is skipped
+        entirely when the data it needs was not collected.
       </p>
     </details>
   );
