@@ -322,6 +322,8 @@ export interface AgentFinding {
   /** The ordered path: entry hop first, each later hop naming the edge that reached it. */
   hops: AgentHop[];
   reasoning: string;
+  /** A concrete fix, required -- a claimed path with no remediation is not actionable. */
+  remediation: string;
 }
 
 /**
@@ -342,6 +344,8 @@ export const agentRuns = sqliteTable(
     accountId: text("account_id")
       .notNull()
       .references(() => cloudAccounts.id, { onDelete: "cascade" }),
+    /** The sync run whose stored state the agent analysed, recorded so a run is auditable. */
+    snapshotSyncRunId: text("snapshot_sync_run_id"),
     outcome: text("outcome", { enum: AGENT_OUTCOMES }).notNull(),
     steps: integer("steps").notNull().default(0),
     toolCallsJson: text("tool_calls_json", { mode: "json" })

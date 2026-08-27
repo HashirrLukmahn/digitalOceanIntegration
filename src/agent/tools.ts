@@ -185,6 +185,9 @@ export function buildTools(
               reasoning: z
                 .string()
                 .describe("How an attacker gets from the entry point to the target"),
+              remediation: z
+                .string()
+                .describe("A concrete fix that breaks the path -- required, not optional"),
             }),
           )
           .describe("Empty array if no multi-resource path exists."),

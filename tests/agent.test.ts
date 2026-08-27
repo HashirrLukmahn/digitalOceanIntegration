@@ -63,6 +63,7 @@ describe("terminal tool", () => {
         { resourceExternalId: "do:dbaas:db-orders", viaRelationship: "trusts", viaDirection: "inbound" },
       ],
       reasoning: "web-01 is internet-facing and the database trusts it as a source.",
+      remediation: "Restrict web-01's public ingress, or remove it from the database's trusted sources.",
     };
 
     const result = await runAgent({
@@ -98,6 +99,7 @@ describe("terminal tool", () => {
             severity: "high",
             hops: [{ resourceExternalId: "do:droplet:101", findingKind: "droplet.public_ingress" }],
             reasoning: "restating the rule engine",
+            remediation: "n/a",
           },
         ],
       }),
@@ -122,6 +124,7 @@ describe("terminal tool", () => {
               { resourceExternalId: "do:droplet:104", viaRelationship: "trusts", viaDirection: "outbound" },
             ],
             reasoning: "asserts an edge the stored graph does not contain",
+            remediation: "irrelevant, should be dropped",
           },
         ],
       }),
@@ -146,12 +149,87 @@ describe("terminal tool", () => {
               { resourceExternalId: "do:dbaas:db-orders", viaRelationship: "trusts", viaDirection: "outbound" },
             ],
             reasoning: "right resources, wrong direction",
+            remediation: "irrelevant, should be dropped",
           },
         ],
       }),
     });
 
     expect(result.findings).toEqual([]);
+  });
+
+  it("drops a grounded chain that ends at a non-sensitive resource", async () => {
+    // lb-public routes_to droplet 101 (a real edge), and lb-public has a finding -- but a
+    // droplet is not a sensitive target, so this is not a path worth reporting.
+    const result = await runAgent({
+      accountId,
+      model: modelCalling("report_findings", {
+        findings: [
+          {
+            title: "Path to a plain droplet",
+            severity: "high",
+            hops: [
+              { resourceExternalId: "do:loadbalancer:lb-public", findingKind: "load_balancer.public_frontend" },
+              { resourceExternalId: "do:droplet:101", viaRelationship: "routes_to", viaDirection: "outbound" },
+            ],
+            reasoning: "real edge, but the target is not sensitive",
+            remediation: "n/a",
+          },
+        ],
+      }),
+    });
+
+    expect(result.findings).toEqual([]);
+  });
+
+  it("drops a grounded chain with no remediation", async () => {
+    const result = await runAgent({
+      accountId,
+      model: modelCalling("report_findings", {
+        findings: [
+          {
+            title: "No fix offered",
+            severity: "high",
+            hops: [
+              { resourceExternalId: "do:droplet:101", findingKind: "droplet.public_ingress" },
+              { resourceExternalId: "do:dbaas:db-orders", viaRelationship: "trusts", viaDirection: "inbound" },
+            ],
+            reasoning: "grounded, but actionless",
+            remediation: "   ",
+          },
+        ],
+      }),
+    });
+
+    expect(result.findings).toEqual([]);
+  });
+
+  it("drops a chain that cites a supporting finding kind which does not exist", async () => {
+    const result = await runAgent({
+      accountId,
+      model: modelCalling("report_findings", {
+        findings: [
+          {
+            title: "Fabricated supporting finding",
+            severity: "high",
+            hops: [
+              { resourceExternalId: "do:droplet:101", findingKind: "droplet.invented_finding" },
+              { resourceExternalId: "do:dbaas:db-orders", viaRelationship: "trusts", viaDirection: "inbound" },
+            ],
+            reasoning: "entry cites a finding kind it does not have",
+            remediation: "should still be dropped",
+          },
+        ],
+      }),
+    });
+
+    expect(result.findings).toEqual([]);
+  });
+
+  it("records the pinned sync run id on the agent run", async () => {
+    await runAgent({ accountId, model: modelCalling("report_findings", { findings: [] }) });
+    const [run] = runs();
+    expect(run!.snapshotSyncRunId).toBeTruthy();
   });
 });
 

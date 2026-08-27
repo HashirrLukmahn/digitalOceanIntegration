@@ -1,0 +1,1 @@
+ALTER TABLE `agent_runs` ADD `snapshot_sync_run_id` text;

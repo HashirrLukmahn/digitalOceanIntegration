@@ -142,6 +142,13 @@ export function AgentSection({ latest }: Props) {
                   ))}
                 </div>
               </div>
+
+              {finding.remediation && (
+                <div>
+                  <div className="eyebrow mb-1.5">Suggested fix</div>
+                  <p className="text-sm leading-relaxed">{finding.remediation}</p>
+                </div>
+              )}
             </div>
           </details>
         ))}
