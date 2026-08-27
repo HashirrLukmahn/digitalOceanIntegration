@@ -18,8 +18,10 @@ import { isPublicInternetCidr, parsePorts } from "./ports";
 
 /** Whether an inbound rule's protocol and port range cover a specific TCP port. */
 export function inboundRuleCoversPort(rule: DoFirewallInboundRule, port: number): boolean {
-  // Sensitive services here are TCP; a UDP rule on the same number is a different service.
-  if (rule.protocol && rule.protocol.toLowerCase() !== "tcp") return false;
+  // Sensitive services here are TCP; a UDP or ICMP rule on the same number is a different
+  // service. Require the protocol to be *explicitly* TCP -- a missing protocol is unknown,
+  // not "assume TCP", so a partial response cannot read a UDP/ICMP allow as an open service.
+  if ((rule.protocol ?? "").toLowerCase() !== "tcp") return false;
   const range = parsePorts(rule.ports);
   return range.all || (port >= range.from && port <= range.to);
 }

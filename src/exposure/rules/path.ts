@@ -34,6 +34,9 @@ export const publicWorkloadToDatastoreRule: PathRule = {
     for (const edge of relationships) {
       if (edge.relationship !== "trusts") continue;
       // The trusts edge is truster -> trusted: source is the datastore, target the workload.
+      // Today every trusts edge is database-sourced; assert it so a future trust edge with a
+      // different source type cannot silently produce a wrong cluster lookup or coverage key.
+      if (resourceTypeFromExternalId(edge.sourceExternalId) !== "digitalocean.database_cluster") continue;
       if (!exposedResourceIds.has(edge.targetExternalId)) continue;
 
       const list = byDatastore.get(edge.sourceExternalId) ?? [];

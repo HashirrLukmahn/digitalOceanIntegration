@@ -99,6 +99,17 @@ describe("database trusts", () => {
     expect(edges[0]!.metadata).toMatchObject({ form: "ip", value: "10.10.0.4" });
   });
 
+  it("resolves an exact-IP trusted source against a droplet's IPv6 address", () => {
+    const inv = withCluster([{ type: "ip_addr", value: "2604:a880:1::5" }]);
+    (inv.droplets[0] as { networks: { v6?: unknown[] } }).networks.v6 = [
+      { ip_address: "2604:a880:1::5", type: "public" },
+    ];
+    const edges = trustEdges(inv);
+    expect(edges).toHaveLength(1);
+    expect(edges[0]).toMatchObject({ targetExternalId: "do:droplet:101", evidence: "derived" });
+    expect(edges[0]!.metadata).toMatchObject({ form: "ip", value: "2604:a880:1::5" });
+  });
+
   it("resolves a CIDR trusted source that contains a droplet address", () => {
     const edges = trustEdges(withCluster([{ type: "ip_addr", value: "10.10.0.0/24" }]));
     expect(edges).toHaveLength(1);

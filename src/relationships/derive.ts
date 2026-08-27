@@ -199,11 +199,16 @@ export function deriveRelationships(inventory: RawInventory): DerivedRelationshi
   // trusted-source type, so claiming one would be unfalsifiable. An IP/CIDR that resolves
   // to no collected resource yields no edge -- it is an external address with no node to
   // point at, and a wide-open 0.0.0.0/0 is already reported as a finding.
-  const dropletV4 = inventory.droplets.map((droplet) => ({
+  // Both v4 and v6 addresses: a database may name a droplet's IPv6 address as a trusted
+  // source, and missing that path would silently drop a real attack pivot. Exact-IP
+  // matching works for either family; CIDR matching below resolves IPv4 ranges only (an
+  // IPv6 CIDR simply matches nothing rather than matching wrongly).
+  const dropletAddresses = inventory.droplets.map((droplet) => ({
     externalId: externalId("droplet", droplet.id),
-    addresses: (droplet.networks?.v4 ?? [])
-      .map((n) => n.ip_address)
-      .filter((ip): ip is string => Boolean(ip)),
+    addresses: [
+      ...(droplet.networks?.v4 ?? []).map((n) => n.ip_address),
+      ...(droplet.networks?.v6 ?? []).map((n) => n.ip_address),
+    ].filter((ip): ip is string => Boolean(ip)),
   }));
 
   for (const cluster of inventory.databases) {
@@ -250,7 +255,7 @@ export function deriveRelationships(inventory: RawInventory): DerivedRelationshi
           // resolving it would falsely "trust" every droplet in the account.
           if (isPublicInternetCidr(value)) break;
           const isCidr = value.includes("/");
-          for (const droplet of dropletV4) {
+          for (const droplet of dropletAddresses) {
             const matched = droplet.addresses.some((addr) =>
               isCidr ? ipv4InCidr(addr, value) : addr === value,
             );
