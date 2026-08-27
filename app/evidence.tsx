@@ -61,6 +61,53 @@ function SeverityRationale({ evidence }: { evidence: Record<string, unknown> }) 
   );
 }
 
+/**
+ * Where the data came from.
+ *
+ * The companion to confidence: the exact DigitalOcean API calls whose responses the finding
+ * was derived from, plus the docs the rule cites. It lets a reader reproduce the evidence
+ * rather than trust the provenance label.
+ */
+function DataSources({
+  sources,
+  references,
+}: {
+  sources?: readonly string[];
+  references?: readonly string[];
+}) {
+  if ((!sources || sources.length === 0) && (!references || references.length === 0)) return null;
+
+  return (
+    <div className="mb-3">
+      <div className="eyebrow mb-1">Sources</div>
+      {sources && sources.length > 0 && (
+        <ul className="space-y-0.5">
+          {sources.map((call) => (
+            <li key={call} className="font-mono text-[0.74rem] text-ink">
+              {call}
+            </li>
+          ))}
+        </ul>
+      )}
+      {references && references.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
+          {references.map((url) => (
+            <a
+              key={url}
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-[0.74rem] text-accent hover:underline"
+            >
+              docs ↗
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex gap-3 py-1">
@@ -175,7 +222,15 @@ function renderValue(value: unknown): React.ReactNode {
   return String(value);
 }
 
-export function Evidence({ evidence }: { evidence: Record<string, unknown> }) {
+export function Evidence({
+  evidence,
+  sources,
+  references,
+}: {
+  evidence: Record<string, unknown>;
+  sources?: readonly string[];
+  references?: readonly string[];
+}) {
   const openRules = Array.isArray(evidence.openRules)
     ? (evidence.openRules as Array<Record<string, unknown>>)
     : null;
@@ -192,6 +247,7 @@ export function Evidence({ evidence }: { evidence: Record<string, unknown> }) {
     <div className="space-y-4">
       <Provenance evidence={evidence} />
       <SeverityRationale evidence={evidence} />
+      <DataSources sources={sources} references={references} />
 
       {openRules && openRules.length > 0 && <OpenRules rules={openRules} />}
       {variables && variables.length > 0 && <Variables variables={variables} />}

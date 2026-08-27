@@ -1,7 +1,8 @@
 import { requireConnection } from "../../src/connection/state";
 import Link from "next/link";
-import { Coverage, Empty, Severity, SeverityLegend, Urn } from "../components";
+import { Coverage, Empty, formatTime, Severity, SeverityLegend, Urn } from "../components";
 import { Evidence } from "../evidence";
+import { apiCallsForFinding, referencesForFinding } from "../../src/exposure/sources";
 import { RemediationBlock } from "../remediation";
 import { AgentSection } from "../agent-section";
 import { latestAgentRun } from "../../src/agent/run";
@@ -68,6 +69,22 @@ export default async function ExposuresPage({
             {summary.exposed} of {summary.resources} resources are reachable from the internet.
             Every finding below states the provider value that proves it.
           </p>
+          {run && (
+            <p className="mt-1.5 text-[0.78rem] text-faint">
+              Data from the sync on{" "}
+              <span className="text-muted">{formatTime(run.completedAt ?? run.startedAt)}</span>{" "}
+              · snapshot{" "}
+              <span className="font-mono">{run.id.slice(0, 8)}</span>{" "}
+              ·{" "}
+              <a
+                href={`/api/export/snapshot?syncRunId=${run.id}`}
+                className="text-accent hover:underline"
+                download
+              >
+                download
+              </a>
+            </p>
+          )}
         </div>
         {/* Exposures-only JSON (the current filter applied), to view or feed to an agent. */}
         <a href={exportHref} className="btn-quiet shrink-0" download>
@@ -189,7 +206,11 @@ export default async function ExposuresPage({
               <div className="grid gap-6 border-t border-rule px-4 py-4 lg:grid-cols-[1.2fr_1fr]">
                 <div className="space-y-4">
                   <p className="text-sm leading-relaxed">{finding.summary}</p>
-                  <Evidence evidence={finding.evidenceJson} />
+                  <Evidence
+                    evidence={finding.evidenceJson}
+                    sources={apiCallsForFinding(finding.kind, finding.coverageKeysJson)}
+                    references={referencesForFinding(finding.kind)}
+                  />
                 </div>
 
                 <div className="space-y-4">
