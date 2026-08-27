@@ -46,12 +46,19 @@ export default async function InventoryPage({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold tracking-tight">Inventory</h1>
-        <p className="mt-1 text-sm text-muted">
-          {summary.resources} resources from the last sync. Internet-facing resources are listed
-          first.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-semibold tracking-tight">Inventory</h1>
+          <p className="mt-1 text-sm text-muted">
+            {summary.resources} resources from the last sync. Internet-facing resources are listed
+            first.
+          </p>
+        </div>
+        {/* The frozen v1 JSON export -- the same file the evaluator integration and the agents
+            consume. Served by /api/export with a download filename. */}
+        <a href="/api/export" className="btn-quiet shrink-0" download>
+          Export JSON
+        </a>
       </div>
 
       <form className="panel flex flex-wrap items-end gap-3 px-4 py-3" action="/inventory">
