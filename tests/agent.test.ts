@@ -328,6 +328,38 @@ describe("tools read the snapshot", () => {
     expect(findings.some((f) => f.kind === "droplet.public_ingress")).toBe(true);
   });
 
+  it("gives each finding its rule, severity reasoning, confidence, and API sources", async () => {
+    const tools = buildTools(accountId);
+    const findings = (await (
+      tools.query_rule_findings!.execute as (a: unknown, o: unknown) => Promise<unknown[]>
+    )({ kind: "database.trusted_source_is_public" }, {})) as Array<Record<string, unknown>>;
+
+    expect(findings.length).toBeGreaterThan(0);
+    const f = findings[0]!;
+    expect(typeof f.ruleExplanation).toBe("string"); // what the rule flags
+    expect(typeof f.severityReasoning).toBe("string"); // why this severity + accessibility
+    expect(f.confidence).toBe("provider_reported");
+    expect(f.sources).toEqual(
+      expect.arrayContaining(["GET /v2/databases", "GET /v2/databases/db-analytics/firewall"]),
+    );
+    expect((f.references as string[]).every((u) => u.startsWith("https://docs.digitalocean.com/"))).toBe(
+      true,
+    );
+  });
+
+  it("explain_rule justifies a rule kind: what it flags, its sources, and the severity model", async () => {
+    const tools = buildTools(accountId);
+    const explained = (await (
+      tools.explain_rule!.execute as (a: unknown, o: unknown) => Promise<Record<string, unknown>>
+    )({ kind: "database.trusted_source_is_public" }, {}))!;
+
+    expect(typeof explained.flags).toBe("string");
+    expect(explained.dataSources).toEqual(expect.arrayContaining(["GET /v2/databases"]));
+    expect(String(explained.severityModel)).toMatch(/sensitivity/i);
+    expect(String(explained.severityModel)).toMatch(/reachability|accessibility/i);
+    expect((explained.references as string[]).length).toBeGreaterThan(0);
+  });
+
   it("exposes relationships for traversal", async () => {
     const tools = buildTools(accountId);
     const edges = (await (

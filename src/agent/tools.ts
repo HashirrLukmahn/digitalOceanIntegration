@@ -1,8 +1,18 @@
 import { tool, type Tool } from "ai";
 import { z } from "zod";
 import { getResourceEdges, listFindings, listResources } from "../data/queries";
+import { catalogueEntry } from "../exposure/catalogue";
+import { apiCallsForFinding, referencesForFinding } from "../exposure/sources";
 import { createTransport } from "../do/transport";
 import { runSync } from "../sync/run";
+
+/** How severity and confidence work, stated once for the explain_rule tool. */
+const SEVERITY_MODEL =
+  "Severity = sensitivity (what the resource holds: datastore > credential > none) × " +
+  "reachability/accessibility (how much the internet can reach it: sensitive ports > all ports > " +
+  "web ports > restricted), read from a fixed matrix and then shifted by bounded, named modifiers. " +
+  "Confidence (provider_reported, derived, active_probe, heuristic) is a separate axis -- it says how " +
+  "strong the proof is and never changes the severity level.";
 
 /**
  * The agent's tools.
@@ -62,21 +72,58 @@ export function buildTools(
 
     query_rule_findings: tool({
       description:
-        "List findings already produced by the deterministic rule engine. These are " +
-        "the confirmed single-resource problems and are the usual starting points for " +
-        "a chain. Do not re-report them.",
+        "List findings already produced by the deterministic rule engine. These are the " +
+        "confirmed single-resource problems and the usual starting points for a chain -- do " +
+        "not re-report them. Each finding tells you the rule it violated (`kind` + " +
+        "`ruleExplanation`), WHY it has its severity and accessibility (`severityReasoning`), " +
+        "how strong the proof is (`confidence`), the exact DigitalOcean API calls behind it " +
+        "(`sources`), the documentation it cites (`references`), and the fix (`remediation`).",
       inputSchema: z.object({
         severity: SEVERITY.optional(),
         kind: z.string().optional().describe('e.g. "droplet.public_ingress"'),
       }),
       execute: async (filters) =>
-        listFindings(accountId, filters).map((f) => ({
-          resourceExternalId: f.resourceExternalId,
-          kind: f.kind,
-          severity: f.severity,
-          title: f.title,
-          evidence: f.evidenceJson,
-        })),
+        listFindings(accountId, filters).map((f) => {
+          const evidence = f.evidenceJson as Record<string, unknown>;
+          const rationale = evidence.severityRationale as { formula?: unknown } | undefined;
+          return {
+            resourceExternalId: f.resourceExternalId,
+            kind: f.kind,
+            ruleExplanation: catalogueEntry(f.kind)?.title ?? null,
+            severity: f.severity,
+            severityReasoning:
+              rationale && typeof rationale.formula === "string" ? rationale.formula : null,
+            confidence: typeof evidence.confidence === "string" ? evidence.confidence : null,
+            sources: apiCallsForFinding(f.kind, f.coverageKeysJson),
+            references: referencesForFinding(f.kind),
+            coverageKeys: f.coverageKeysJson,
+            remediation: f.remediation,
+            evidence: f.evidenceJson,
+          };
+        }),
+    }),
+
+    explain_rule: tool({
+      description:
+        "Explain one rule/finding kind: what it flags, why it carries the severity it does, " +
+        "which DigitalOcean API calls it reads, and the documentation it cites. Use it to " +
+        "justify a finding's rule, its severity, and its accessibility in your own words.",
+      inputSchema: z.object({
+        kind: z
+          .string()
+          .describe('The rule/finding kind, e.g. "database.trusted_source_is_public"'),
+      }),
+      execute: async ({ kind }) => {
+        const entry = catalogueEntry(kind);
+        return {
+          kind,
+          flags: entry?.title ?? "Unknown rule kind.",
+          group: entry?.group ?? null,
+          dataSources: apiCallsForFinding(kind, []),
+          references: referencesForFinding(kind),
+          severityModel: SEVERITY_MODEL,
+        };
+      },
     }),
 
     query_relationships: tool({

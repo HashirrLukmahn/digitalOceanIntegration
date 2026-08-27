@@ -53,6 +53,13 @@ export const RULE_CATALOGUE: readonly RuleCatalogueEntry[] = [
   { kind: "path.exposed_app_leaks_datastore_credential", group: "Attack paths (cross-resource)", title: "Public app holding a datastore's credential in plaintext — the credential is exposed and the app is a pivot." },
 ];
 
+const CATALOGUE_BY_KIND = new Map(RULE_CATALOGUE.map((entry) => [entry.kind, entry]));
+
+/** The catalogue entry for a rule kind, or undefined if the kind is unknown. */
+export function catalogueEntry(kind: string): RuleCatalogueEntry | undefined {
+  return CATALOGUE_BY_KIND.get(kind);
+}
+
 /** Catalogue grouped for display, in first-seen group order. */
 export function catalogueByGroup(): Array<{ group: string; entries: RuleCatalogueEntry[] }> {
   const order: string[] = [];
