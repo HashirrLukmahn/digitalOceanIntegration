@@ -18,6 +18,10 @@ import {
 } from "../src/exposure/rules/network";
 import { backendPortReachability } from "../src/exposure/effective-policy";
 import {
+  dnsRecordToUnassignedReservedIpRule,
+  reservedIpUnassignedRule,
+} from "../src/exposure/rules/dns";
+import {
   kubernetesAutoUpgradeDisabledRule,
   kubernetesUpgradeAvailableRule,
 } from "../src/exposure/rules/kubernetes";
@@ -851,6 +855,65 @@ describe("path: public workload to datastore", () => {
       fullInventory({ databaseFirewalls: { "db-x": [{ type: "ip_addr", value: "0.0.0.0/0" }] } as never }),
     );
     expect(result.findings.some((f) => f.kind === "path.public_workload_to_datastore")).toBe(false);
+  });
+});
+
+describe("reserved IPs and stale DNS", () => {
+  const unassigned = { ip: "203.0.113.250", region: { slug: "nyc3" }, droplet: null };
+  const assigned = { ip: "203.0.113.240", region: { slug: "nyc3" }, droplet: { id: 5 } };
+
+  it("flags an unassigned reserved IP as informational, but not an assigned one", () => {
+    const findings = reservedIpUnassignedRule.evaluate(
+      buildContext(inventory({ reservedIps: [unassigned, assigned] as never })),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.kind).toBe("netip.reserved_ip.unassigned");
+    expect(findings[0]!.severity).toBe("low");
+    expect(findings[0]!.resourceExternalId).toBe("do:reserved_ip:203.0.113.250");
+    expect(findings[0]!.provesInternetExposure).toBe(false);
+  });
+
+  const dnsInventory = (records: Record<string, unknown>[], reservedIps: Record<string, unknown>[] = [unassigned]) =>
+    inventory({
+      reservedIps: reservedIps as never,
+      domains: [{ name: "acme.example" }] as never,
+      domainRecords: { "acme.example": records } as never,
+    });
+
+  it("flags a record pointing at the account's own unassigned reserved IP as a heuristic", () => {
+    const [finding] = dnsRecordToUnassignedReservedIpRule.evaluate(
+      buildContext(dnsInventory([{ type: "A", name: "stale", data: "203.0.113.250" }])),
+    );
+    expect(finding!.kind).toBe("dns.record_to_unassigned_reserved_ip");
+    expect(finding!.confidence).toBe("heuristic");
+    expect(finding!.severity).toBe("low");
+    expect(finding!.resourceExternalId).toBe("do:domain:acme.example");
+    expect(finding!.summary).toMatch(/not\s+proven takeover/i);
+    expect(finding!.coverageKeys).toEqual(["reserved_ips", "domains", "dns_records:acme.example"]);
+  });
+
+  it("does NOT flag a record pointing at an external IP (external hosting is normal)", () => {
+    expect(
+      dnsRecordToUnassignedReservedIpRule.evaluate(
+        buildContext(dnsInventory([{ type: "A", name: "cdn", data: "198.51.100.7" }])),
+      ),
+    ).toEqual([]);
+  });
+
+  it("does NOT flag a record pointing at an ASSIGNED reserved IP", () => {
+    expect(
+      dnsRecordToUnassignedReservedIpRule.evaluate(
+        buildContext(dnsInventory([{ type: "A", name: "live", data: "203.0.113.240" }], [assigned])),
+      ),
+    ).toEqual([]);
+  });
+
+  it("ignores non-address records like CNAME", () => {
+    expect(
+      dnsRecordToUnassignedReservedIpRule.evaluate(
+        buildContext(dnsInventory([{ type: "CNAME", name: "www", data: "203.0.113.250" }])),
+      ),
+    ).toEqual([]);
   });
 });
 

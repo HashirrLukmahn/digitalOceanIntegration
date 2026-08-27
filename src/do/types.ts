@@ -333,3 +333,32 @@ export interface DoRegistry {
   created_at?: string;
   storage_usage_bytes?: number;
 }
+
+/**
+ * A reserved (floating) IP. `droplet` is the assigned droplet, or null/absent when the
+ * IP is held by the account but attached to nothing -- which is the state the DNS
+ * heuristic and the informational rule both care about.
+ */
+export interface DoReservedIp {
+  ip: string;
+  region?: DoRegion;
+  droplet?: { id?: number; name?: string } | null;
+  locked?: boolean;
+}
+
+export interface DoDomain {
+  name: string;
+  ttl?: number;
+}
+
+/**
+ * One DNS record. For `A`/`AAAA` records `data` is the target IP; for `CNAME` it is a
+ * hostname. `name` is the subdomain relative to the zone (`@` for the apex).
+ */
+export interface DoDomainRecord {
+  id?: number;
+  type?: string;
+  name?: string;
+  data?: string;
+  ttl?: number;
+}

@@ -258,6 +258,32 @@ const FIXTURES: Record<string, unknown> = {
     links: { pages: {} },
   },
 
+  "/v2/reserved_ips": {
+    reserved_ips: [
+      // Assigned to web-01 -> no finding.
+      { ip: "203.0.113.240", region: { slug: "nyc3" }, droplet: { id: 101, name: "web-01" } },
+      // Held but attached to nothing -> informational finding, and the target of a stale record.
+      { ip: "203.0.113.250", region: { slug: "nyc3" }, droplet: null },
+    ],
+    links: { pages: {} },
+  },
+
+  "/v2/domains": {
+    domains: [{ name: "acme.example", ttl: 1800 }],
+    links: { pages: {} },
+  },
+  "/v2/domains/acme.example/records": {
+    domain_records: [
+      // Points at the account's own UNASSIGNED reserved IP -> stale-DNS heuristic.
+      { id: 1, type: "A", name: "stale", data: "203.0.113.250", ttl: 300 },
+      // Points at the live public load balancer IP -> a live target, must NOT be flagged.
+      { id: 2, type: "A", name: "@", data: "203.0.113.200", ttl: 300 },
+      // Not an address record -> ignored.
+      { id: 3, type: "CNAME", name: "www", data: "acme.example.", ttl: 300 },
+    ],
+    links: { pages: {} },
+  },
+
   "/v2/vpcs": {
     vpcs: [
       {

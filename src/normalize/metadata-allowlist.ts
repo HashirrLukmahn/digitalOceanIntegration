@@ -29,6 +29,8 @@ export const METADATA_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
   // allowlist keeps only the plainly-safe descriptive keys. `sha1_fingerprint` is a public
   // identifier, not a secret.
   "digitalocean.certificate": ["state", "not_after", "sha1_fingerprint", "dns_names", "created_at"],
+  "digitalocean.reserved_ip": ["locked"],
+  "digitalocean.domain": ["ttl"],
   "digitalocean.space": [],
 };
 

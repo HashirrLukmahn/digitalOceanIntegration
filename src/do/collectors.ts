@@ -18,6 +18,8 @@ import type {
   DoCertificate,
   DoDatabaseCluster,
   DoDatabaseFirewallRule,
+  DoDomain,
+  DoDomainRecord,
   DoDroplet,
   DoFirewall,
   DoKubernetesAvailableUpgrade,
@@ -26,6 +28,7 @@ import type {
   DoProject,
   DoProjectResource,
   DoRegistry,
+  DoReservedIp,
   DoVolume,
   DoVpc,
 } from "./types";
@@ -62,6 +65,10 @@ export interface RawInventory {
   volumes: DoVolume[];
   registries: DoRegistry[];
   certificates: DoCertificate[];
+  reservedIps: DoReservedIp[];
+  domains: DoDomain[];
+  /** DNS records keyed by domain name. Absent = the per-domain fetch was not made. */
+  domainRecords: Record<string, DoDomainRecord[]>;
   /** Anonymous public-read probes for configured Spaces buckets. */
   spaces: BucketProbe[];
   /** Which Spaces capability was available this run. Surfaced in coverage. */
@@ -84,6 +91,9 @@ export function emptyInventory(): RawInventory {
     volumes: [],
     registries: [],
     certificates: [],
+    reservedIps: [],
+    domains: [],
+    domainRecords: {},
     spaces: [],
     spacesMode: "unavailable",
   };
@@ -313,6 +323,49 @@ export const certificatesCollector: Collector = {
   },
 };
 
+export const reservedIpsCollector: Collector = {
+  name: "reserved_ips",
+  required: false,
+  resourceTypes: ["digitalocean.reserved_ip"],
+  async run(http, inventory) {
+    inventory.reservedIps = await collectPaged<DoReservedIp>(
+      http,
+      "/v2/reserved_ips",
+      pick("reserved_ips"),
+    );
+  },
+};
+
+export const domainsCollector: Collector = {
+  name: "domains",
+  required: false,
+  resourceTypes: ["digitalocean.domain"],
+  async run(http, inventory) {
+    inventory.domains = await collectPaged<DoDomain>(http, "/v2/domains", pick("domains"));
+
+    // Records are a per-domain child call, graceful like the DOKS upgrades: a missing
+    // record set for one zone leaves that zone unassessed without failing the collector,
+    // and each zone that succeeds contributes a `dns_records:<domain>` coverage key.
+    const records: Record<string, DoDomainRecord[]> = {};
+    const childKeys: string[] = [];
+    for (const domain of inventory.domains) {
+      try {
+        records[domain.name] = await collectPaged<DoDomainRecord>(
+          http,
+          `/v2/domains/${domain.name}/records`,
+          pick("domain_records"),
+        );
+        childKeys.push(`dns_records:${domain.name}`);
+      } catch {
+        // Leave this zone's records unknown rather than failing the collector.
+      }
+    }
+    inventory.domainRecords = records;
+
+    return { coverageKeys: childKeys };
+  },
+};
+
 export const registriesCollector: Collector = {
   name: "container_registries",
   required: false,
@@ -411,5 +464,7 @@ export const COLLECTORS: readonly Collector[] = [
   volumesCollector,
   registriesCollector,
   certificatesCollector,
+  reservedIpsCollector,
+  domainsCollector,
   spacesCollector,
 ];

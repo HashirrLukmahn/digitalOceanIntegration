@@ -4,12 +4,14 @@ import type {
   DoApp,
   DoCertificate,
   DoDatabaseCluster,
+  DoDomain,
   DoDroplet,
   DoFirewall,
   DoKubernetesCluster,
   DoLoadBalancer,
   DoProject,
   DoRegistry,
+  DoReservedIp,
   DoVolume,
   DoVpc,
 } from "../do/types";
@@ -64,6 +66,8 @@ export const TYPE_TABLE = {
   },
   volume: { type: "digitalocean.volume", urn: "volume", sensitivity: "datastore" },
   certificate: { type: "digitalocean.certificate", urn: "certificate", sensitivity: "none" },
+  reservedIp: { type: "digitalocean.reserved_ip", urn: "reserved_ip", sensitivity: "none" },
+  domain: { type: "digitalocean.domain", urn: "domain", sensitivity: "none" },
 } as const satisfies Record<string, { type: string; urn: string; sensitivity: Sensitivity }>;
 
 export type TypeKey = keyof typeof TYPE_TABLE;
@@ -290,6 +294,25 @@ export function normalizeCertificate(cert: DoCertificate): CloudResource {
   });
 }
 
+export function normalizeReservedIp(reservedIp: DoReservedIp): CloudResource {
+  const assigned = Boolean(reservedIp.droplet && reservedIp.droplet.id);
+  return base("reservedIp", reservedIp.ip, reservedIp.ip, {
+    region: reservedIp.region?.slug ?? null,
+    state: assigned ? "assigned" : "unassigned",
+    raw: reservedIp as unknown as Record<string, unknown>,
+    computed: {
+      public_ipv4: reservedIp.ip,
+      assigned_droplet_id: reservedIp.droplet?.id,
+    },
+  });
+}
+
+export function normalizeDomain(domain: DoDomain): CloudResource {
+  return base("domain", domain.name, domain.name, {
+    raw: domain as unknown as Record<string, unknown>,
+  });
+}
+
 /** Normalize an entire raw inventory. Order is stable for reproducible exports. */
 export function normalizeInventory(inventory: RawInventory): CloudResource[] {
   return [
@@ -304,6 +327,8 @@ export function normalizeInventory(inventory: RawInventory): CloudResource[] {
     ...inventory.volumes.map(normalizeVolume),
     ...inventory.registries.map(normalizeRegistry),
     ...inventory.certificates.map(normalizeCertificate),
+    ...inventory.reservedIps.map(normalizeReservedIp),
+    ...inventory.domains.map(normalizeDomain),
     ...inventory.spaces.map(normalizeSpace),
   ];
 }

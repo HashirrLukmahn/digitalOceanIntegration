@@ -293,6 +293,41 @@ context cannot cheaply provide.
 
 ---
 
+## 11. Production-context severity modifier
+
+**Idea.** Feed the environment signal the engine already collects — DO **project**
+`environment` ("Production"), `env:` tags, app-spec `production: true` — into severity as a
+named, bounded modifier: `+1 (production)` on a finding whose resource, or the project that
+contains it, is production. The `SeverityModifier` machinery in `severity.ts` is built for
+exactly this and is currently unwired (every `deriveSeverity` call passes no modifiers), so
+this is plumbing an existing mechanism, not inventing one. The trace reads
+`high then +1 (production) ⇒ critical`, recorded in evidence.
+
+**Buys.** Proportionality the matrix alone cannot express: a public database is bad; a
+public *production* database is worse, and the report would say so in an auditable step.
+It also finally connects the production/test data we already store to the severity we emit.
+
+**Costs.** Tags are user-controlled, so this is only safe as an **escalate-only** signal.
+A `-1 (test)` that de-escalates would let anyone hide a real exposure by mislabeling a
+production database `env:test` — so severity must never be *lowered* by a label. Sourcing
+from the DO-structured project `environment` field is more trustworthy than a free-form
+tag, but even that is user-set; the modifier must be presented as "escalated because
+labeled production", never as ground truth. There is also a small coupling cost: a path or
+resource rule now needs the containing project's environment, which means resolving the
+`contains` edge (or the project index) at severity time.
+
+**Recommendation: build it, escalate-only, when touching severity next.** It is a small,
+well-contained, high-signal change that reuses the modifier system as designed. The one
+firm rule: it may only ever raise severity, never suppress it, and the reason must be in
+the auditable trace.
+
+**Trigger.** Any severity-tuning pass, or the first user report that "a public prod
+datastore and a public scratch datastore read the same." Pairs naturally with [[10]] if a
+shared graph/index lands, since resolving "which project contains this resource" is the
+same traversal.
+
+---
+
 ## Asked and answered: not possible
 
 Recorded so they stop being re-proposed. Both were requested and neither is buildable

@@ -8,6 +8,7 @@ import {
 } from "./rules/database";
 import { appPlaintextSecretEnvRule } from "./rules/app-secrets";
 import { certificateExpiringRule } from "./rules/certificate";
+import { dnsRecordToUnassignedReservedIpRule, reservedIpUnassignedRule } from "./rules/dns";
 import { dropletNoFirewallRule, dropletOpenIngressRule } from "./rules/droplet";
 import {
   appPublicIngressRule,
@@ -52,6 +53,8 @@ export const RULES: readonly ExposureRule[] = [
   appPublicIngressRule,
   appPlaintextSecretEnvRule,
   certificateExpiringRule,
+  reservedIpUnassignedRule,
+  dnsRecordToUnassignedReservedIpRule,
   spacePublicReadRule,
 ];
 
