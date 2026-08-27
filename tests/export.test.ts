@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Database } from "../src/db/client";
 import { FixtureDoHttp } from "../src/do/fixtures";
 import { buildExport, NoAccountError } from "../src/export/build";
+import { buildExposuresExport } from "../src/export/exposures";
 import { runSync } from "../src/sync/run";
 import { createTestDb, fixedClock } from "./helpers/db";
 
@@ -117,6 +118,74 @@ describe("export shape", () => {
     // The exported relationship type cannot even name `trusts`; the cast keeps this as a
     // runtime backstop against a future change that widens the export union by accident.
     expect(relationships.some((e) => (e.relationship as string) === "trusts")).toBe(false);
+  });
+});
+
+describe("exposures export", () => {
+  it("exports the current findings, self-describing and evidence-carrying", async () => {
+    await runSync({ http: new FixtureDoHttp(), db });
+    const result = buildExposuresExport({ db, now: () => new Date("2026-02-01T12:00:00Z") });
+
+    expect(result.format).toBe("digitalocean-exposures-export");
+    expect(result.version).toBe("1");
+    expect(result.generatedAt).toBe("2026-02-01T12:00:00.000Z");
+    expect(result.account.externalId).toBe("team-1f4d2c9a");
+    expect(result.count).toBe(result.exposures.length);
+    expect(result.count).toBeGreaterThan(0);
+
+    for (const exposure of result.exposures) {
+      expect(Object.keys(exposure).sort()).toEqual([
+        "evidence",
+        "fingerprint",
+        "firstSeenAt",
+        "kind",
+        "lastSeenAt",
+        "remediation",
+        "resourceExternalId",
+        "severity",
+        "summary",
+        "title",
+      ]);
+      expect(exposure.fingerprint).toMatch(/^[0-9a-f]{64}$/);
+    }
+  });
+
+  it("is ordered by severity, highest first", async () => {
+    await runSync({ http: new FixtureDoHttp(), db });
+    const { exposures } = buildExposuresExport({ db });
+    const rank = { critical: 0, high: 1, medium: 2, low: 3 } as const;
+    for (let i = 1; i < exposures.length; i++) {
+      expect(rank[exposures[i]!.severity]).toBeGreaterThanOrEqual(rank[exposures[i - 1]!.severity]);
+    }
+  });
+
+  it("respects a severity filter and records it", async () => {
+    await runSync({ http: new FixtureDoHttp(), db });
+    const result = buildExposuresExport({ db, filters: { severity: "critical" } });
+
+    expect(result.filters.severity).toBe("critical");
+    expect(result.exposures.length).toBeGreaterThan(0);
+    expect(result.exposures.every((e) => e.severity === "critical")).toBe(true);
+  });
+
+  it("respects a resourceType filter", async () => {
+    await runSync({ http: new FixtureDoHttp(), db });
+    const result = buildExposuresExport({ db, filters: { resourceType: "digitalocean.database_cluster" } });
+
+    expect(result.exposures.length).toBeGreaterThan(0);
+    expect(result.exposures.every((e) => e.resourceExternalId.startsWith("do:dbaas:"))).toBe(true);
+  });
+
+  it("contains no credential", async () => {
+    await runSync({ http: new FixtureDoHttp(), db });
+    const serialised = JSON.stringify(buildExposuresExport({ db }));
+    expect(serialised).not.toContain("REDACT-ME-fixture-password");
+    expect(serialised).not.toContain("postgresql://");
+    expect(serialised).not.toContain("dop_v1_");
+  });
+
+  it("refuses to export before any sync has run", () => {
+    expect(() => buildExposuresExport({ db })).toThrow(NoAccountError);
   });
 });
 

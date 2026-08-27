@@ -51,14 +51,28 @@ export default async function ExposuresPage({
 
   const filtered = Boolean(params.severity || params.kind || params.resourceType);
 
+  // Carry the active filters into the exposures export, so the download matches exactly what
+  // is on screen -- filter to the criticals, export the criticals.
+  const exportQuery = new URLSearchParams();
+  if (params.severity) exportQuery.set("severity", params.severity);
+  if (params.kind) exportQuery.set("kind", params.kind);
+  if (params.resourceType) exportQuery.set("resourceType", params.resourceType);
+  const exportHref = `/api/export/exposures${exportQuery.toString() ? `?${exportQuery}` : ""}`;
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold tracking-tight">Exposures</h1>
-        <p className="mt-1 text-sm text-muted">
-          {summary.exposed} of {summary.resources} resources are reachable from the internet.
-          Every finding below states the provider value that proves it.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-semibold tracking-tight">Exposures</h1>
+          <p className="mt-1 text-sm text-muted">
+            {summary.exposed} of {summary.resources} resources are reachable from the internet.
+            Every finding below states the provider value that proves it.
+          </p>
+        </div>
+        {/* Exposures-only JSON (the current filter applied), to view or feed to an agent. */}
+        <a href={exportHref} className="btn-quiet shrink-0" download>
+          Export exposures JSON
+        </a>
       </div>
 
       {/* Severity distribution doubles as the filter control. */}
