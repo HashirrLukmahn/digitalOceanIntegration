@@ -3,6 +3,7 @@ import type { Database } from "../src/db/client";
 import { FixtureDoHttp } from "../src/do/fixtures";
 import { buildExport, NoAccountError } from "../src/export/build";
 import { buildExposuresExport } from "../src/export/exposures";
+import { loadSnapshotExport, NoSnapshotError } from "../src/export/snapshot";
 import { runSync } from "../src/sync/run";
 import { createTestDb, fixedClock } from "./helpers/db";
 
@@ -186,6 +187,38 @@ describe("exposures export", () => {
 
   it("refuses to export before any sync has run", () => {
     expect(() => buildExposuresExport({ db })).toThrow(NoAccountError);
+  });
+});
+
+describe("snapshot export", () => {
+  it("exports the stored snapshot document for the latest run", async () => {
+    const result = await runSync({ http: new FixtureDoHttp(), db });
+    const doc = loadSnapshotExport({ db });
+
+    expect(doc.snapshotVersion).toBe("1");
+    expect(doc.syncRunId).toBe(result.runId);
+    expect(doc.resources.length).toBeGreaterThan(0);
+    // Unlike the frozen v1 export, the snapshot carries the internal trusts edge.
+    expect(doc.relationships.some((e) => e.relationship === "trusts")).toBe(true);
+  });
+
+  it("exports a specific earlier run by syncRunId", async () => {
+    const clock = fixedClock();
+    const first = await runSync({ http: new FixtureDoHttp(), db, now: clock.now });
+    clock.advance(60_000);
+    const second = await runSync({ http: new FixtureDoHttp(), db, now: clock.now });
+
+    expect(loadSnapshotExport({ db, syncRunId: first.runId }).syncRunId).toBe(first.runId);
+    expect(loadSnapshotExport({ db }).syncRunId).toBe(second.runId); // latest by default
+  });
+
+  it("throws for an unknown run id", async () => {
+    await runSync({ http: new FixtureDoHttp(), db });
+    expect(() => loadSnapshotExport({ db, syncRunId: "does-not-exist" })).toThrow(NoSnapshotError);
+  });
+
+  it("throws before any sync has run", () => {
+    expect(() => loadSnapshotExport({ db })).toThrow(NoAccountError);
   });
 });
 

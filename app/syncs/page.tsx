@@ -46,7 +46,18 @@ export default function SyncsPage() {
                   {run.resourcesCount} resources · {run.relationshipsCount} relationships ·{" "}
                   {run.findingsCount} findings
                 </span>
-                <span className="ml-auto font-mono text-[0.72rem] text-faint">{run.id}</span>
+                <span className="ml-auto flex items-center gap-3">
+                  {/* The point-in-time snapshot this run stored -- what it actually
+                      evaluated, not current state. */}
+                  <a
+                    href={`/api/export/snapshot?syncRunId=${run.id}`}
+                    className="text-[0.72rem] text-accent hover:underline"
+                    download
+                  >
+                    snapshot
+                  </a>
+                  <span className="font-mono text-[0.72rem] text-faint">{run.id}</span>
+                </span>
               </div>
 
               {run.error && (

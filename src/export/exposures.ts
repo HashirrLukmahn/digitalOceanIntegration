@@ -1,7 +1,7 @@
-import { and, desc, eq, isNull, sql, type SQL } from "drizzle-orm";
+import { desc } from "drizzle-orm";
 import { getDb, type Database } from "../db/client";
-import { cloudAccounts, exposureFindings } from "../db/schema";
-import { resourceTypeFromExternalId } from "../normalize/resource";
+import { cloudAccounts } from "../db/schema";
+import { listFindings } from "../data/queries";
 import { NoAccountError } from "./build";
 
 /**
@@ -47,9 +47,6 @@ export interface BuildExposuresExportOptions {
   filters?: { severity?: string; kind?: string; resourceType?: string };
 }
 
-const SEVERITY_ORDER = sql`case ${exposureFindings.severity}
-  when 'critical' then 0 when 'high' then 1 when 'medium' then 2 else 3 end`;
-
 export function buildExposuresExport(options: BuildExposuresExportOptions = {}): ExposuresExport {
   const db = options.db ?? getDb();
   const now = options.now ?? (() => new Date());
@@ -64,28 +61,9 @@ export function buildExposuresExport(options: BuildExposuresExportOptions = {}):
     .all();
   if (!account) throw new NoAccountError();
 
-  const clauses: SQL[] = [
-    eq(exposureFindings.accountId, account.id),
-    // Only current (unresolved) findings, matching what the exposures page shows.
-    isNull(exposureFindings.resolvedAt),
-  ];
-  if (filters.severity) clauses.push(eq(exposureFindings.severity, filters.severity as never));
-  if (filters.kind) clauses.push(eq(exposureFindings.kind, filters.kind));
-
-  let rows = db
-    .select()
-    .from(exposureFindings)
-    .where(and(...clauses))
-    .orderBy(SEVERITY_ORDER, exposureFindings.resourceExternalId)
-    .all();
-
-  // The external id encodes the type (`do:dbaas:x` -> database cluster), so this is a parse
-  // rather than a per-row lookup -- identical to the exposures page's own filter.
-  if (filters.resourceType) {
-    rows = rows.filter(
-      (row) => resourceTypeFromExternalId(row.resourceExternalId) === filters.resourceType,
-    );
-  }
+  // Reuse the exposures page's own query -- same severity ordering, same filters -- so the
+  // download and the screen can never disagree on which findings are current.
+  const rows = listFindings(account.id, filters, db);
 
   return {
     format: "digitalocean-exposures-export",

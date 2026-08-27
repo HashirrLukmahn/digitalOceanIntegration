@@ -1,5 +1,5 @@
 import { and, count, desc, eq, inArray, isNull, like, or, sql, type SQL } from "drizzle-orm";
-import { getDb } from "../db/client";
+import { getDb, type Database } from "../db/client";
 import { resourceTypeFromExternalId } from "../normalize/resource";
 import {
   cloudAccounts,
@@ -154,7 +154,11 @@ export interface FindingFilters {
 const SEVERITY_ORDER = sql`case ${exposureFindings.severity}
   when 'critical' then 0 when 'high' then 1 when 'medium' then 2 else 3 end`;
 
-export function listFindings(accountId: string, filters: FindingFilters = {}): ExposureFindingRow[] {
+export function listFindings(
+  accountId: string,
+  filters: FindingFilters = {},
+  db: Database = getDb(),
+): ExposureFindingRow[] {
   const clauses: SQL[] = [
     eq(exposureFindings.accountId, accountId),
     isNull(exposureFindings.resolvedAt),
@@ -162,7 +166,7 @@ export function listFindings(accountId: string, filters: FindingFilters = {}): E
   if (filters.severity) clauses.push(eq(exposureFindings.severity, filters.severity as never));
   if (filters.kind) clauses.push(eq(exposureFindings.kind, filters.kind));
 
-  const rows = getDb()
+  const rows = db
     .select()
     .from(exposureFindings)
     .where(and(...clauses))
