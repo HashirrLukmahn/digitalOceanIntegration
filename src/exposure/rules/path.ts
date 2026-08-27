@@ -115,3 +115,89 @@ export const publicWorkloadToDatastoreRule: PathRule = {
     return findings;
   },
 };
+
+/**
+ * A datastore whose access credential is stored in plaintext on an internet-exposed app
+ * that depends on it.
+ *
+ * This is a DigitalOcean-specific escalation the network-trust path misses. App Platform
+ * injects a managed database's connection string into the app's environment; if that
+ * variable is left `GENERAL` (plaintext) rather than `SECRET`, the credential is readable
+ * by anyone with spec access -- every team member, every CI job, every connected tool --
+ * and the app itself is on the public internet. So the datastore is reachable two ways at
+ * once: read the plaintext credential, or compromise the public app that holds it. It fires
+ * only when all three facts line up (public app + plaintext-secret finding + a depends_on
+ * edge to a datastore), which is what keeps it off the many apps that legitimately hold a
+ * *secret*-typed credential. Confidence `derived`; the finding sits on the datastore.
+ */
+export const exposedAppLeaksDatastoreCredentialRule: PathRule = {
+  kind: "path.exposed_app_leaks_datastore_credential",
+  category: "attack_path",
+  requires: ["apps", "databases"],
+  references: [
+    "https://docs.digitalocean.com/products/app-platform/how-to/use-environment-variables/",
+    "https://docs.digitalocean.com/products/databases/postgresql/how-to/secure/",
+  ],
+  evaluate({ relationships, exposedResourceIds, findingsByResource, inventory }) {
+    const findings: DraftFinding[] = [];
+    const byDatastore = new Map<string, string[]>();
+
+    for (const edge of relationships) {
+      if (edge.relationship !== "depends_on") continue;
+      const app = edge.sourceExternalId;
+      const datastore = edge.targetExternalId;
+      // The depends_on edges are app -> database; guard the target type explicitly.
+      if (resourceTypeFromExternalId(datastore) !== "digitalocean.database_cluster") continue;
+      // The app must be internet-exposed *and* have a plaintext-secret finding: a public app
+      // holding a properly SECRET-typed credential is normal and is not reported.
+      if (!exposedResourceIds.has(app)) continue;
+      const appFindings = findingsByResource.get(app) ?? [];
+      if (!appFindings.some((f) => f.kind === "app.plaintext_secret_env")) continue;
+
+      const list = byDatastore.get(datastore) ?? [];
+      list.push(app);
+      byDatastore.set(datastore, list);
+    }
+
+    for (const [datastore, apps] of byDatastore) {
+      const clusterId = datastore.split(":").slice(2).join(":");
+      const cluster = inventory.databases.find((c) => c.id === clusterId);
+      const name = cluster?.name ?? datastore;
+
+      findings.push({
+        resourceExternalId: datastore,
+        kind: "path.exposed_app_leaks_datastore_credential",
+        severity: "high",
+        confidence: "derived",
+        provesInternetExposure: false,
+        title: "Datastore credential is stored in plaintext on an internet-exposed app",
+        summary:
+          `Datastore "${name}" is depended on by ${apps.length} internet-exposed App Platform ` +
+          `app(s) (${apps.join(", ")}) that store credential-shaped environment variables in ` +
+          `plaintext (GENERAL rather than SECRET). The datastore's access credential is therefore ` +
+          `readable by anyone with app-spec access and is held on a public app, so the datastore is ` +
+          `reachable both by reading the plaintext value and by compromising the exposed app.`,
+        evidence: {
+          confidence: "derived",
+          severityRationale: {
+            base: "high",
+            modifiers: [],
+            final: "high",
+            formula:
+              "internet-exposed app + plaintext credential + depends_on datastore ⇒ credential disclosure and pivot ⇒ high",
+          },
+          datastore,
+          exposedApps: apps,
+        },
+        remediation:
+          "Change the app's database credential variables to type SECRET so DigitalOcean " +
+          "encrypts them, rotate the exposed credential, and prefer the database's private " +
+          "connection endpoint. Confirm the app's public routes do not expose the credential.",
+        stableElement: `app-credential-leak:${apps.slice().sort().join(",")}`,
+        coverageKeys: ["apps", "databases"],
+      });
+    }
+
+    return findings;
+  },
+};

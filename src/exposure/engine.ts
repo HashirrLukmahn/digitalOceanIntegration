@@ -21,7 +21,10 @@ import {
   kubernetesUpgradeAvailableRule,
 } from "./rules/kubernetes";
 import { spacePublicReadRule } from "./rules/space";
-import { publicWorkloadToDatastoreRule } from "./rules/path";
+import {
+  exposedAppLeaksDatastoreCredentialRule,
+  publicWorkloadToDatastoreRule,
+} from "./rules/path";
 import {
   buildContext,
   fingerprint,
@@ -64,7 +67,10 @@ export const RULES: readonly ExposureRule[] = [
  * findings and the trust graph. They describe *combinations* -- an exposed workload a
  * datastore trusts -- rather than single-resource misconfigurations.
  */
-export const PATH_RULES: readonly PathRule[] = [publicWorkloadToDatastoreRule];
+export const PATH_RULES: readonly PathRule[] = [
+  publicWorkloadToDatastoreRule,
+  exposedAppLeaksDatastoreCredentialRule,
+];
 
 export interface EvaluatedFinding extends DraftFinding {
   /** Stable fingerprint; the primary key of `exposure_findings`. */
@@ -135,7 +141,13 @@ export function evaluateExposure(
 
   // --- Phase 2: path rules -------------------------------------------------------
   const relationships = options.relationships ?? deriveRelationships(inventory);
-  const pathContext: PathContext = { ...context, relationships, exposedResourceIds };
+  const findingsByResource = new Map<string, DraftFinding[]>();
+  for (const finding of findings) {
+    const list = findingsByResource.get(finding.resourceExternalId) ?? [];
+    list.push(finding);
+    findingsByResource.set(finding.resourceExternalId, list);
+  }
+  const pathContext: PathContext = { ...context, relationships, exposedResourceIds, findingsByResource };
   for (const rule of pathRules) {
     if (!canRun(rule)) continue;
     for (const draft of rule.evaluate(pathContext)) collect(draft);

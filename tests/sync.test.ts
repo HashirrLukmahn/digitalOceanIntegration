@@ -122,11 +122,14 @@ describe("sync against the fixture account", () => {
 
     // analytics trusts 0.0.0.0/0 -> a direct critical exposure.
     expect(byResource.get("do:dbaas:db-analytics")?.severity).toBe("critical");
-    // orders names specific droplets -- but web-01 (droplet 101) is itself public with SSH
-    // open to the world, so its trust becomes a path: a compromised public workload reaches
-    // the data even though the database is not directly exposed.
-    expect(byResource.get("do:dbaas:db-orders")?.kind).toBe("path.public_workload_to_datastore");
-    expect(byResource.get("do:dbaas:db-orders")?.severity).toBe("high");
+    // db-orders is reachable by TWO independent paths, so it carries two path findings:
+    //   - web-01 (droplet 101) is public with SSH open and the database trusts it, and
+    //   - the public storefront app holds the database credential in plaintext.
+    const dbOrdersKinds = findings
+      .filter((f) => f.resourceExternalId === "do:dbaas:db-orders")
+      .map((f) => f.kind);
+    expect(dbOrdersKinds).toContain("path.public_workload_to_datastore");
+    expect(dbOrdersKinds).toContain("path.exposed_app_leaks_datastore_credential");
     // ...and the path finding does not mark the database itself internet-exposed.
     expect(rows.resources().find((r) => r.externalId === "do:dbaas:db-orders")?.isInternetExposed).toBe(false);
 

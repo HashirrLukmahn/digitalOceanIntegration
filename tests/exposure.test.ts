@@ -1040,6 +1040,46 @@ describe("coverage gating", () => {
   });
 });
 
+describe("path: exposed app leaks datastore credential", () => {
+  const database = { id: "db-1", name: "pg-cluster", connection: { host: "h", port: 25060 } };
+  const publicApp = (envs: Record<string, unknown>[]) => ({
+    id: "app-1",
+    live_url: "https://x.example",
+    spec: { name: "x", databases: [{ cluster_name: "pg-cluster" }], envs },
+  });
+  const evalFull = (envs: Record<string, unknown>[]) =>
+    evaluateExposure(
+      ACCOUNT,
+      inventory({ apps: [publicApp(envs) as never], databases: [database as never] }),
+    );
+
+  it("fires when a public app with a plaintext DB credential depends on the datastore", () => {
+    const result = evalFull([{ key: "DATABASE_URL", type: "GENERAL", value: "postgresql://u:p@h/db" }]);
+    const path = result.findings.find(
+      (f) => f.kind === "path.exposed_app_leaks_datastore_credential",
+    );
+    expect(path).toBeDefined();
+    expect(path!.resourceExternalId).toBe("do:dbaas:db-1");
+    expect(path!.severity).toBe("high");
+    expect(path!.confidence).toBe("derived");
+    expect(path!.provesInternetExposure).toBe(false);
+  });
+
+  it("does NOT fire when the credential is a proper SECRET-typed variable", () => {
+    const result = evalFull([{ key: "DATABASE_URL", type: "SECRET", value: "EV[1:enc]" }]);
+    expect(
+      result.findings.some((f) => f.kind === "path.exposed_app_leaks_datastore_credential"),
+    ).toBe(false);
+  });
+
+  it("does NOT fire for an app with no credential-shaped plaintext variables", () => {
+    const result = evalFull([{ key: "LOG_LEVEL", type: "GENERAL", value: "info" }]);
+    expect(
+      result.findings.some((f) => f.kind === "path.exposed_app_leaks_datastore_credential"),
+    ).toBe(false);
+  });
+});
+
 describe("engine", () => {
   it("returns findings sorted by severity and marks exposed resources", () => {
     const result = evaluateExposure(

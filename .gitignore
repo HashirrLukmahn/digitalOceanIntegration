@@ -21,3 +21,6 @@ coverage/
 
 # Editor-installed skill packs; not part of this project.
 .claude/skills/
+
+# Code-graph tooling cache; generated, not part of this project.
+graphify-out/
