@@ -1,6 +1,6 @@
 import { requireConnection } from "../../src/connection/state";
 import Link from "next/link";
-import { Coverage, Empty, Severity, Urn } from "../components";
+import { Coverage, Empty, Severity, SeverityLegend, Urn } from "../components";
 import { Evidence } from "../evidence";
 import { RemediationBlock } from "../remediation";
 import { AgentSection } from "../agent-section";
@@ -141,6 +141,8 @@ export default async function ExposuresPage({
           </form>
         )}
       </div>
+
+      <SeverityLegend />
 
       {run && <Coverage coverage={run.coverageJson} />}
 

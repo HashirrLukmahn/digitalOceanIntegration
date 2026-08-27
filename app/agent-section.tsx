@@ -122,25 +122,46 @@ export function AgentSection({ latest }: Props) {
               </div>
 
               <div>
-                <div className="eyebrow mb-1.5">Path</div>
-                <div className="flex flex-col gap-1.5">
-                  {finding.hops.map((hop, hopIndex) => (
-                    <div key={hop.resourceExternalId} className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      {hopIndex > 0 && hop.viaRelationship && (
-                        <span className="font-mono text-[0.68rem] text-faint">
-                          └ {hop.viaDirection === "inbound" ? "←" : "→"} {hop.viaRelationship} →
-                        </span>
-                      )}
-                      <Urn
-                        id={hop.resourceExternalId}
-                        href={`/inventory/${encodeURIComponent(hop.resourceExternalId)}`}
-                      />
-                      {hop.findingKind && (
-                        <span className="font-mono text-[0.68rem] text-muted">({hop.findingKind})</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                <div className="eyebrow mb-2">Attack path</div>
+                <ol className="space-y-0">
+                  {finding.hops.map((hop, hopIndex) => {
+                    const role =
+                      hopIndex === 0
+                        ? "Entry"
+                        : hopIndex === finding.hops.length - 1
+                          ? "Target"
+                          : "Pivot";
+                    return (
+                      <li key={hop.resourceExternalId}>
+                        {hopIndex > 0 && hop.viaRelationship && (
+                          <div className="ml-[4.75rem] flex items-center gap-2 py-1 text-[0.72rem] text-faint">
+                            <span aria-hidden className="font-mono">↓</span>
+                            <span>
+                              via <span className="font-mono text-muted">{hop.viaRelationship}</span>
+                              {hop.viaDirection ? ` (${hop.viaDirection})` : ""}
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex items-start gap-3">
+                          <span className="mt-0.5 w-16 shrink-0 text-[0.68rem] font-medium uppercase tracking-[0.08em] text-faint">
+                            {role}
+                          </span>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Urn
+                              id={hop.resourceExternalId}
+                              href={`/inventory/${encodeURIComponent(hop.resourceExternalId)}`}
+                            />
+                            {hop.findingKind && (
+                              <span className="font-mono text-[0.68rem] text-muted">
+                                {hop.findingKind}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
               </div>
 
               {finding.remediation && (

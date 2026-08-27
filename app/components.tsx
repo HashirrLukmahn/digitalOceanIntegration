@@ -31,6 +31,92 @@ export function Severity({ level }: { level: string }) {
   );
 }
 
+/**
+ * The severity legend.
+ *
+ * Severity is not a score -- it is a lookup: what the resource holds (sensitivity) by how
+ * much of it the internet can reach (reachability). This renders that exact matrix so the
+ * team can read any finding's level straight off the table. Confidence is a separate axis
+ * and never moves the level.
+ */
+const LEGEND_REACH = [
+  { key: "sensitive_ports", label: "Sensitive ports", hint: "SSH, DB, admin" },
+  { key: "all_ports", label: "All ports", hint: "no firewall" },
+  { key: "web_ports", label: "Web ports", hint: "80 / 443" },
+  { key: "restricted", label: "Restricted", hint: "allowlisted" },
+] as const;
+
+const LEGEND_SENS = [
+  { key: "datastore", label: "Datastore", hint: "databases, volumes, Spaces" },
+  { key: "credential", label: "Credential", hint: "clusters, registries" },
+  { key: "none", label: "None", hint: "compute, load balancers, apps" },
+] as const;
+
+const LEGEND_MATRIX: Record<string, Record<string, string>> = {
+  datastore: { sensitive_ports: "critical", all_ports: "critical", web_ports: "high", restricted: "medium" },
+  credential: { sensitive_ports: "critical", all_ports: "high", web_ports: "medium", restricted: "low" },
+  none: { sensitive_ports: "high", all_ports: "high", web_ports: "low", restricted: "low" },
+};
+
+export function SeverityLegend() {
+  return (
+    <details className="panel px-4 py-3">
+      <summary className="cursor-pointer list-none text-sm font-medium">
+        How severity is scored
+        <span className="ml-2 text-[0.78rem] font-normal text-muted">
+          sensitivity × reachability — click to expand
+        </span>
+      </summary>
+
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full min-w-[40rem] border-collapse text-center text-sm">
+          <thead>
+            <tr>
+              <th className="p-2 text-left text-[0.72rem] font-normal uppercase tracking-[0.08em] text-faint">
+                What it holds ↓ / Reachable →
+              </th>
+              {LEGEND_REACH.map((col) => (
+                <th key={col.key} className="p-2">
+                  <div className="text-[0.78rem] font-medium text-ink">{col.label}</div>
+                  <div className="text-[0.68rem] font-normal text-faint">{col.hint}</div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {LEGEND_SENS.map((row) => (
+              <tr key={row.key} className="border-t border-rule">
+                <td className="p-2 text-left">
+                  <div className="text-[0.82rem] font-medium text-ink">{row.label}</div>
+                  <div className="text-[0.68rem] text-faint">{row.hint}</div>
+                </td>
+                {LEGEND_REACH.map((col) => {
+                  const level = LEGEND_MATRIX[row.key]![col.key]!;
+                  return (
+                    <td key={col.key} className="p-2">
+                      <span className={`text-[0.82rem] font-medium capitalize ${SEVERITY_CLASS[level]}`}>
+                        {level}
+                      </span>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <p className="mt-3 text-[0.78rem] leading-relaxed text-muted">
+        Named modifiers can shift a level by one (for example, a resource in a production
+        project). <span className="font-medium text-ink">Confidence</span> — whether the
+        evidence is provider-reported, derived, actively probed, or a heuristic — is shown on
+        each finding and never changes the level: a heuristic is presented as a heuristic, not
+        dressed up as a verified critical.
+      </p>
+    </details>
+  );
+}
+
 export function Urn({ id, href }: { id: string; href?: string }) {
   if (href) {
     return (
