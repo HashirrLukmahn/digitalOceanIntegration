@@ -1,4 +1,5 @@
 import { externalId } from "../../normalize/resource";
+import { publicDenyCoversPort, publicDenyCoversRange } from "../effective-policy";
 import {
   anyPublicInternetSource,
   describePorts,
@@ -36,6 +37,10 @@ import { publicAddresses, type DraftFinding, type ExposureRule } from "../types"
  */
 export const dropletNoFirewallRule: ExposureRule = {
   kind: "droplet.no_firewall",
+  // Needs the firewalls collector: "no firewall attached" is only meaningful if firewalls
+  // were actually listed. Without it the empty firewall set would look like no protection.
+  requires: ["droplets", "firewalls"],
+  references: ["https://docs.digitalocean.com/products/networking/firewalls/"],
   evaluate({ inventory, firewallsByDropletId }) {
     const findings: DraftFinding[] = [];
 
@@ -104,6 +109,8 @@ interface OpenRule {
  */
 export const dropletOpenIngressRule: ExposureRule = {
   kind: "droplet.public_ingress",
+  requires: ["droplets", "firewalls"],
+  references: ["https://docs.digitalocean.com/products/networking/firewalls/how-to/configure-rules/"],
   evaluate({ inventory, firewallsByDropletId }) {
     const findings: DraftFinding[] = [];
 
@@ -111,14 +118,22 @@ export const dropletOpenIngressRule: ExposureRule = {
       const publicIps = publicAddresses(droplet);
       if (publicIps.length === 0) continue;
 
+      const firewalls = firewallsByDropletId.get(droplet.id) ?? [];
       const openRules: OpenRule[] = [];
 
-      for (const firewall of firewallsByDropletId.get(droplet.id) ?? []) {
+      for (const firewall of firewalls) {
         for (const rule of firewall.inbound_rules ?? []) {
+          // Only ALLOW rules with a public source are candidate exposures. Deny rules are
+          // the thing that closes them, and take precedence across every firewall on the
+          // droplet, so they are applied as suppression below rather than reported.
+          if ((rule.action ?? "allow") === "deny") continue;
           const source = anyPublicInternetSource(rule.sources?.addresses);
           if (!source) continue;
 
           const range = parsePorts(rule.ports);
+          // A public deny covering this whole range cancels the allow entirely.
+          if (publicDenyCoversRange(firewalls, range.from, range.to)) continue;
+
           openRules.push({
             firewallId: firewall.id,
             firewallName: firewall.name,
@@ -126,7 +141,10 @@ export const dropletOpenIngressRule: ExposureRule = {
             ports: rule.ports,
             source,
             description: describePorts(range, rule.protocol),
-            sensitiveServices: sensitivePortsInRange(range),
+            // A sensitive service is only effectively open if no public deny covers its port.
+            sensitiveServices: sensitivePortsInRange(range).filter(
+              (service) => !publicDenyCoversPort(firewalls, service.port),
+            ),
             allPorts: range.all,
           });
         }

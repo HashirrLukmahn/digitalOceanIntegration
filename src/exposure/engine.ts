@@ -29,6 +29,7 @@ import {
   type ExposureRule,
   type PathContext,
   type PathRule,
+  type RuleContract,
 } from "./types";
 
 /**
@@ -82,6 +83,11 @@ export interface EvaluateOptions {
   now?: Date;
   /** Pre-derived relationships; recomputed from the inventory if omitted. */
   relationships?: readonly DerivedRelationship[];
+  /**
+   * The granular coverage keys authoritative this run. When supplied, a rule whose
+   * `requires` are not all present is skipped. Omit to run every rule (unit tests).
+   */
+  authoritativeKeys?: ReadonlySet<string>;
 }
 
 export function evaluateExposure(
@@ -93,6 +99,15 @@ export function evaluateExposure(
   const pathRules = options.pathRules ?? PATH_RULES;
   const now = options.now ?? new Date();
   const context = buildContext(inventory, now);
+
+  // A rule runs only if the collectors it requires were authoritative this run. When no
+  // coverage is supplied (unit tests, ad-hoc calls) every rule runs -- gating is a
+  // production safeguard, not a change to a rule's own logic. This is what stops a failed
+  // firewalls collector from turning `droplet.no_firewall` into a false positive on every
+  // public droplet: the rule is skipped, not fed an empty firewall list.
+  const authoritativeKeys = options.authoritativeKeys;
+  const canRun = (rule: RuleContract): boolean =>
+    !authoritativeKeys || !rule.requires || rule.requires.every((key) => authoritativeKeys.has(key));
 
   const findings: EvaluatedFinding[] = [];
   const seen = new Set<string>();
@@ -107,6 +122,7 @@ export function evaluateExposure(
 
   // --- Phase 1: base rules -------------------------------------------------------
   for (const rule of rules) {
+    if (!canRun(rule)) continue;
     for (const draft of rule.evaluate(context)) collect(draft);
   }
 
@@ -119,14 +135,9 @@ export function evaluateExposure(
 
   // --- Phase 2: path rules -------------------------------------------------------
   const relationships = options.relationships ?? deriveRelationships(inventory);
-  const findingsByResource = new Map<string, DraftFinding[]>();
-  for (const finding of findings) {
-    const list = findingsByResource.get(finding.resourceExternalId) ?? [];
-    list.push(finding);
-    findingsByResource.set(finding.resourceExternalId, list);
-  }
-  const pathContext: PathContext = { ...context, relationships, exposedResourceIds, findingsByResource };
+  const pathContext: PathContext = { ...context, relationships, exposedResourceIds };
   for (const rule of pathRules) {
+    if (!canRun(rule)) continue;
     for (const draft of rule.evaluate(pathContext)) collect(draft);
   }
 

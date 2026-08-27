@@ -134,7 +134,7 @@ describe("sync against the fixture account", () => {
     // heuristic. The record pointing at the live LB IP is not flagged.
     expect(byResource.get("do:reserved_ip:203.0.113.250")?.kind).toBe("netip.reserved_ip.unassigned");
     expect(byResource.has("do:reserved_ip:203.0.113.240")).toBe(false);
-    expect(byResource.get("do:domain:acme.example")?.kind).toBe("dns.record_to_unassigned_reserved_ip");
+    expect(byResource.get("do:domain:acme.example")?.kind).toBe("dns.record_points_to_unassigned_reserved_ip");
 
     // Control-plane firewall explicitly disabled fires; restricted and null do not.
     expect(byResource.get("do:kubernetes:k8s-prod")?.kind).toBe("kubernetes.public_control_plane");

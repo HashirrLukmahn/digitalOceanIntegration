@@ -7,11 +7,13 @@ import type { DraftFinding, ExposureRule } from "../types";
  * Informational, on purpose. An unassigned reserved IP is **not** attacker-claimable while
  * the account holds it -- so this is not an exposure. It is worth surfacing anyway: it
  * costs money, and it is the ingredient a dangling-DNS record needs (see
- * `dns.record_to_unassigned_reserved_ip`). Reported at `low` so it informs without
+ * `dns.record_points_to_unassigned_reserved_ip`). Reported at `low` so it informs without
  * competing with real exposures.
  */
 export const reservedIpUnassignedRule: ExposureRule = {
   kind: "netip.reserved_ip.unassigned",
+  requires: ["reserved_ips"],
+  references: ["https://docs.digitalocean.com/products/networking/reserved-ips/"],
   evaluate({ inventory }) {
     const findings: DraftFinding[] = [];
 
@@ -67,7 +69,9 @@ export const reservedIpUnassignedRule: ExposureRule = {
  * exploitability, and the finding text says so.
  */
 export const dnsRecordToUnassignedReservedIpRule: ExposureRule = {
-  kind: "dns.record_to_unassigned_reserved_ip",
+  kind: "dns.record_points_to_unassigned_reserved_ip",
+  requires: ["reserved_ips", "domains"],
+  references: ["https://docs.digitalocean.com/products/networking/dns/"],
   evaluate({ inventory }) {
     const findings: DraftFinding[] = [];
 
@@ -89,7 +93,7 @@ export const dnsRecordToUnassignedReservedIpRule: ExposureRule = {
 
       findings.push({
         resourceExternalId: externalId("domain", domainName),
-        kind: "dns.record_to_unassigned_reserved_ip",
+        kind: "dns.record_points_to_unassigned_reserved_ip",
         severity: "low",
         confidence: "heuristic",
         provesInternetExposure: false,

@@ -16,6 +16,8 @@ import type { DraftFinding, ExposureRule } from "../types";
  */
 export const spacePublicReadRule: ExposureRule = {
   kind: "space.public_read",
+  requires: ["spaces"],
+  references: ["https://docs.digitalocean.com/products/spaces/how-to/manage-access/"],
   evaluate({ inventory }) {
     const findings: DraftFinding[] = [];
 

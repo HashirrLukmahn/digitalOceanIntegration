@@ -30,6 +30,11 @@ const DAY_MS = 86_400_000;
 /** A cluster with a public endpoint and no trusted sources at all. */
 export const databasePublicNoTrustedSourcesRule: ExposureRule = {
   kind: "database.public_no_trusted_sources",
+  requires: ["databases"],
+  references: [
+    "https://docs.digitalocean.com/products/databases/postgresql/how-to/secure/",
+    "https://docs.digitalocean.com/reference/api/reference/databases/",
+  ],
   evaluate({ inventory }) {
     const findings: DraftFinding[] = [];
 
@@ -99,6 +104,8 @@ export const databasePublicNoTrustedSourcesRule: ExposureRule = {
  */
 export const databaseVersionEndOfLifeRule: ExposureRule = {
   kind: "database.version_end_of_life",
+  requires: ["databases"],
+  references: ["https://docs.digitalocean.com/reference/api/reference/databases/"],
   evaluate({ inventory, now }) {
     const findings: DraftFinding[] = [];
     const nowMs = now.getTime();
@@ -170,6 +177,8 @@ export const databaseVersionEndOfLifeRule: ExposureRule = {
 /** A cluster whose trusted sources include the entire internet. */
 export const databaseTrustedSourceIsPublicRule: ExposureRule = {
   kind: "database.trusted_source_is_public",
+  requires: ["databases"],
+  references: ["https://docs.digitalocean.com/products/databases/postgresql/how-to/secure/"],
   evaluate({ inventory }) {
     const findings: DraftFinding[] = [];
 

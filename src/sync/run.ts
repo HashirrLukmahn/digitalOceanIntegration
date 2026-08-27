@@ -159,8 +159,13 @@ export async function runSync(options: SyncOptions): Promise<SyncResult> {
   const resources = normalizeInventory(inventory);
   const relationships = deriveRelationships(inventory);
   // Reuse the relationships already derived so the path rules traverse the same graph the
-  // rest of the sync persists, rather than recomputing it.
-  const exposure = evaluateExposure(accountId, inventory, { now: startedAt, relationships });
+  // rest of the sync persists, and pass the authoritative coverage so a rule whose inputs
+  // were not collected this run is skipped rather than run against empty data.
+  const exposure = evaluateExposure(accountId, inventory, {
+    now: startedAt,
+    relationships,
+    authoritativeKeys,
+  });
 
   for (const resource of resources) {
     resource.isInternetExposed = exposure.exposedResourceIds.has(resource.externalId);

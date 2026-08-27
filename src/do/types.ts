@@ -99,9 +99,16 @@ export interface DoFirewallRuleTarget {
 }
 
 export interface DoFirewallInboundRule {
+  /** "tcp", "udp", "icmp", or "all" (the latter used by deny-all rules). */
   protocol: string;
   ports: string;
   sources?: DoFirewallRuleTarget;
+  /**
+   * "allow" or "deny". Absent means allow (older rules predate the field). Deny rules take
+   * precedence across every firewall applied to a Droplet, so a deny in one firewall blocks
+   * traffic another firewall allows -- the effective policy is allow-minus-deny.
+   */
+  action?: "allow" | "deny";
 }
 
 export interface DoFirewallOutboundRule {

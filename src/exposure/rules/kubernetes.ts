@@ -25,6 +25,8 @@ function parseK8sVersion(value: string | undefined): { major: number; minor: num
  */
 export const kubernetesAutoUpgradeDisabledRule: ExposureRule = {
   kind: "kubernetes.auto_upgrade_disabled",
+  requires: ["kubernetes"],
+  references: ["https://docs.digitalocean.com/products/kubernetes/how-to/upgrade-cluster/"],
   evaluate({ inventory }) {
     const findings: DraftFinding[] = [];
 
@@ -84,6 +86,8 @@ export const kubernetesAutoUpgradeDisabledRule: ExposureRule = {
  */
 export const kubernetesUpgradeAvailableRule: ExposureRule = {
   kind: "kubernetes.upgrade_available",
+  requires: ["kubernetes"],
+  references: ["https://docs.digitalocean.com/products/kubernetes/details/supported-releases/"],
   evaluate({ inventory }) {
     const findings: DraftFinding[] = [];
 

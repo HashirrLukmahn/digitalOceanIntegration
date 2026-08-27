@@ -32,6 +32,10 @@ function boundPublicLoadBalancers(certId: string, loadBalancers: readonly DoLoad
 
 export const certificateExpiringRule: ExposureRule = {
   kind: "certificate.expiring",
+  // Reads certificates, and load balancers to decide whether a cert is bound to a public
+  // endpoint (the escalation), so both must be authoritative.
+  requires: ["certificates", "load_balancers"],
+  references: ["https://docs.digitalocean.com/products/networking/certificates/"],
   evaluate({ inventory, now }) {
     const findings: DraftFinding[] = [];
     const nowMs = now.getTime();

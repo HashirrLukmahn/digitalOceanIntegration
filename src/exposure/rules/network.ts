@@ -23,6 +23,8 @@ import type { DraftFinding, ExposureRule } from "../types";
  */
 export const loadBalancerPublicRule: ExposureRule = {
   kind: "load_balancer.public_frontend",
+  requires: ["load_balancers"],
+  references: ["https://docs.digitalocean.com/products/networking/load-balancers/"],
   evaluate({ inventory }) {
     const findings: DraftFinding[] = [];
 
@@ -115,6 +117,8 @@ export const loadBalancerPublicRule: ExposureRule = {
  */
 export const kubernetesPublicEndpointRule: ExposureRule = {
   kind: "kubernetes.public_control_plane",
+  requires: ["kubernetes"],
+  references: ["https://docs.digitalocean.com/products/kubernetes/how-to/configure-cluster-firewall/"],
   evaluate({ inventory }) {
     const findings: DraftFinding[] = [];
 
@@ -175,6 +179,8 @@ export const kubernetesPublicEndpointRule: ExposureRule = {
  */
 export const appPublicIngressRule: ExposureRule = {
   kind: "app.public_ingress",
+  requires: ["apps"],
+  references: ["https://docs.digitalocean.com/products/app-platform/"],
   evaluate({ inventory }) {
     const findings: DraftFinding[] = [];
 
@@ -238,6 +244,13 @@ export const appPublicIngressRule: ExposureRule = {
  */
 export const loadBalancerSensitiveBackendPortRule: ExposureRule = {
   kind: "load_balancer.sensitive_backend_port",
+  // Combines the LB, its backends, and their firewalls -- all three must be observed.
+  requires: ["load_balancers", "droplets", "firewalls"],
+  category: "attack_path",
+  references: [
+    "https://docs.digitalocean.com/products/networking/load-balancers/",
+    "https://docs.digitalocean.com/products/networking/firewalls/",
+  ],
   evaluate({ inventory, firewallsByDropletId }) {
     const findings: DraftFinding[] = [];
 

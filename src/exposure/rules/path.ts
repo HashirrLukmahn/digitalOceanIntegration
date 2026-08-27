@@ -23,6 +23,12 @@ import type { DraftFinding, PathRule } from "../types";
  */
 export const publicWorkloadToDatastoreRule: PathRule = {
   kind: "path.public_workload_to_datastore",
+  category: "attack_path",
+  // The trust half needs the database listing and its firewall; the exposure half needs
+  // whatever proved the workload public. Requiring the common collectors keeps a path from
+  // being asserted on a run where the firewall or droplet data was missing.
+  requires: ["databases", "droplets", "firewalls"],
+  references: ["https://docs.digitalocean.com/products/databases/postgresql/how-to/secure/"],
   evaluate({ inventory, relationships, exposedResourceIds }) {
     // Group exposed trusted workloads by the datastore that trusts them: one finding per
     // datastore, listing every internet-exposed entry point into it.

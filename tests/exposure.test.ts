@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { emptyInventory, type RawInventory } from "../src/do/collectors";
-import { evaluateExposure } from "../src/exposure/engine";
+import { evaluateExposure, PATH_RULES, RULES } from "../src/exposure/engine";
 import { describePorts, isPublicInternetCidr, parsePorts } from "../src/exposure/ports";
 import { calibrateSeverity } from "../src/exposure/severity";
 import { buildContext, fingerprint, indexFirewallsByDroplet } from "../src/exposure/types";
@@ -721,6 +721,92 @@ describe("effective firewall policy", () => {
     const fw = { id: "f", name: "f", inbound_rules: [{ protocol: "udp", ports: "5432", sources: { load_balancer_uids: ["lb-x"] } }] };
     expect(backendPortReachability([fw as never], 5432, "lb-x")).toBe(null);
   });
+
+  it("returns null when a public deny overrides an LB allow (deny precedence)", () => {
+    const fw = {
+      id: "f",
+      name: "f",
+      inbound_rules: [
+        tcp("5432", { load_balancer_uids: ["lb-x"] }), // allow (default action)
+        { protocol: "all", ports: "0", sources: { addresses: ["0.0.0.0/0"] }, action: "deny" },
+      ],
+    };
+    expect(backendPortReachability([fw as never], 5432, "lb-x")).toBe(null);
+  });
+
+  it("returns null when a specific public deny cancels a public allow on the port", () => {
+    const fw = {
+      id: "f",
+      name: "f",
+      inbound_rules: [
+        tcp("5432", { addresses: ["0.0.0.0/0"] }), // allow
+        { protocol: "tcp", ports: "5432", sources: { addresses: ["0.0.0.0/0"] }, action: "deny" },
+      ],
+    };
+    expect(backendPortReachability([fw as never], 5432, "lb-x")).toBe(null);
+  });
+});
+
+describe("firewall deny rules on droplet ingress", () => {
+  const droplet = publicDroplet(); // id 1, public IPv4
+  const fwWith = (rules: Record<string, unknown>[]) => ({
+    id: "fw",
+    name: "fw",
+    droplet_ids: [1],
+    inbound_rules: rules,
+  });
+
+  it("does not report a port a deny rule blocks, despite a broad allow", () => {
+    const findings = run(
+      dropletOpenIngressRule,
+      inventory({
+        droplets: [droplet],
+        firewalls: [
+          fwWith([
+            { protocol: "tcp", ports: "22", sources: { addresses: ["0.0.0.0/0"] }, action: "allow" },
+            { protocol: "tcp", ports: "22", sources: { addresses: ["0.0.0.0/0"] }, action: "deny" },
+          ]) as never,
+        ],
+      }),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it("suppresses the finding entirely when a deny-all covers a public allow-all", () => {
+    const findings = run(
+      dropletOpenIngressRule,
+      inventory({
+        droplets: [droplet],
+        firewalls: [
+          fwWith([
+            { protocol: "tcp", ports: "0", sources: { addresses: ["0.0.0.0/0"] }, action: "allow" },
+            { protocol: "all", ports: "0", sources: { addresses: ["0.0.0.0/0"] }, action: "deny" },
+          ]) as never,
+        ],
+      }),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it("keeps the finding but drops a specifically-denied sensitive service", () => {
+    const findings = run(
+      dropletOpenIngressRule,
+      inventory({
+        droplets: [droplet],
+        firewalls: [
+          fwWith([
+            { protocol: "tcp", ports: "0", sources: { addresses: ["0.0.0.0/0"] }, action: "allow" },
+            { protocol: "tcp", ports: "22", sources: { addresses: ["0.0.0.0/0"] }, action: "deny" },
+          ]) as never,
+        ],
+      }),
+    ) as Array<{ evidence: { openRules: Array<{ sensitiveServices: Array<{ service: string }> }> } }>;
+    expect(findings.length).toBe(1);
+    const services = findings[0]!.evidence.openRules.flatMap((r) =>
+      r.sensitiveServices.map((s) => s.service),
+    );
+    expect(services).not.toContain("SSH");
+  });
 });
 
 describe("load balancer sensitive backend port", () => {
@@ -884,7 +970,7 @@ describe("reserved IPs and stale DNS", () => {
     const [finding] = dnsRecordToUnassignedReservedIpRule.evaluate(
       buildContext(dnsInventory([{ type: "A", name: "stale", data: "203.0.113.250" }])),
     );
-    expect(finding!.kind).toBe("dns.record_to_unassigned_reserved_ip");
+    expect(finding!.kind).toBe("dns.record_points_to_unassigned_reserved_ip");
     expect(finding!.confidence).toBe("heuristic");
     expect(finding!.severity).toBe("low");
     expect(finding!.resourceExternalId).toBe("do:domain:acme.example");
@@ -914,6 +1000,43 @@ describe("reserved IPs and stale DNS", () => {
         buildContext(dnsInventory([{ type: "CNAME", name: "www", data: "203.0.113.250" }])),
       ),
     ).toEqual([]);
+  });
+});
+
+describe("rule contract", () => {
+  it("every registered rule declares at least one DigitalOcean reference", () => {
+    for (const rule of [...RULES, ...PATH_RULES]) {
+      expect(rule.references.length).toBeGreaterThan(0);
+      for (const url of rule.references) {
+        expect(url).toMatch(/^https:\/\/docs\.digitalocean\.com\//);
+      }
+    }
+  });
+});
+
+describe("coverage gating", () => {
+  it("skips a rule whose required collector was not authoritative this run", () => {
+    // A public droplet with no firewalls in the inventory. Ungated, this fires
+    // droplet.no_firewall -- which is exactly the false positive when the firewalls
+    // collector *failed* rather than the droplet genuinely having no firewall.
+    const inv = inventory({ droplets: [publicDroplet()] });
+    expect(evaluateExposure(ACCOUNT, inv).findings.some((f) => f.kind === "droplet.no_firewall")).toBe(
+      true,
+    );
+
+    // With coverage supplied and firewalls NOT authoritative, the droplet rules are skipped.
+    const gated = evaluateExposure(ACCOUNT, inv, {
+      authoritativeKeys: new Set(["droplets", "digitalocean.droplet"]),
+    });
+    expect(gated.findings.some((f) => f.kind.startsWith("droplet."))).toBe(false);
+  });
+
+  it("runs the rule once its required collectors are all authoritative", () => {
+    const inv = inventory({ droplets: [publicDroplet()] });
+    const gated = evaluateExposure(ACCOUNT, inv, {
+      authoritativeKeys: new Set(["droplets", "firewalls"]),
+    });
+    expect(gated.findings.some((f) => f.kind === "droplet.no_firewall")).toBe(true);
   });
 });
 

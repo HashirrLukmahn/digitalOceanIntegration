@@ -76,6 +76,8 @@ function allVariables(app: DoApp): Array<{ component: string; variable: DoAppEnv
 
 export const appPlaintextSecretEnvRule: ExposureRule = {
   kind: "app.plaintext_secret_env",
+  requires: ["apps"],
+  references: ["https://docs.digitalocean.com/products/app-platform/how-to/use-environment-variables/"],
   evaluate({ inventory }) {
     const findings: DraftFinding[] = [];
 
