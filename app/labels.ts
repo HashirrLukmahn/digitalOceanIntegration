@@ -16,6 +16,9 @@ const TYPE_LABELS: Record<string, string> = {
   "digitalocean.container_registry": "Registry",
   "digitalocean.volume": "Volume",
   "digitalocean.space": "Space",
+  "digitalocean.certificate": "Certificate",
+  "digitalocean.reserved_ip": "Reserved IP",
+  "digitalocean.domain": "Domain",
 };
 
 export function label(type: string): string {

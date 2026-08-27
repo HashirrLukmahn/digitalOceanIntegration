@@ -211,11 +211,16 @@ interface CloudResource {
 | App Platform app   | `digitalocean.app`                | `do:app:<id>`          | `none`       |
 | Container registry | `digitalocean.container_registry` | `do:registry:<name>`   | `credential` |
 | Volume             | `digitalocean.volume`             | `do:volume:<id>`       | `datastore`  |
+| Certificate        | `digitalocean.certificate`        | `do:certificate:<id>`  | `none`       |
+| Reserved IP        | `digitalocean.reserved_ip`        | `do:reserved_ip:<ip>`  | `none`       |
+| Domain             | `digitalocean.domain`             | `do:domain:<name>`     | `none`       |
 
 Allowlisted metadata may include project ID, VPC ID, public/private addresses,
 firewall IDs, backend IDs, database engine/version, and public hostname. It must
-exclude tokens, credentials, connection strings, user data, certificates,
-database users, Kubernetes credentials, registry credentials, and object data.
+exclude tokens, credentials, connection strings, user data, **certificate material**
+(private keys / PEM bodies — the certificate *resource* is inventoried by name, expiry,
+fingerprint, and state, but its key material is never stored), database users,
+Kubernetes credentials, registry credentials, and object data.
 
 ## Required collectors
 
