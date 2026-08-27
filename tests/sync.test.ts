@@ -120,9 +120,15 @@ describe("sync against the fixture account", () => {
     expect(byResource.get("do:droplet:104")?.kind).toBe("droplet.public_ingress");
     expect(byResource.get("do:droplet:104")?.severity).toBe("low");
 
-    // analytics trusts 0.0.0.0/0; orders names specific droplets.
+    // analytics trusts 0.0.0.0/0 -> a direct critical exposure.
     expect(byResource.get("do:dbaas:db-analytics")?.severity).toBe("critical");
-    expect(byResource.has("do:dbaas:db-orders")).toBe(false);
+    // orders names specific droplets -- but web-01 (droplet 101) is itself public with SSH
+    // open to the world, so its trust becomes a path: a compromised public workload reaches
+    // the data even though the database is not directly exposed.
+    expect(byResource.get("do:dbaas:db-orders")?.kind).toBe("path.public_workload_to_datastore");
+    expect(byResource.get("do:dbaas:db-orders")?.severity).toBe("high");
+    // ...and the path finding does not mark the database itself internet-exposed.
+    expect(rows.resources().find((r) => r.externalId === "do:dbaas:db-orders")?.isInternetExposed).toBe(false);
 
     // Control-plane firewall explicitly disabled fires; restricted and null do not.
     expect(byResource.get("do:kubernetes:k8s-prod")?.kind).toBe("kubernetes.public_control_plane");

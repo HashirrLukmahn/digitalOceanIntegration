@@ -788,6 +788,72 @@ describe("load balancer sensitive backend port", () => {
   });
 });
 
+describe("path: public workload to datastore", () => {
+  // A public droplet with SSH open to the world...
+  const publicOpenDroplet = {
+    id: 700,
+    name: "app-01",
+    networks: { v4: [{ ip_address: "203.0.113.70", type: "public" }] },
+    tags: ["app"],
+  };
+  const openFirewall = {
+    id: "fw-open",
+    name: "open",
+    droplet_ids: [700],
+    inbound_rules: [{ protocol: "tcp", ports: "22", sources: { addresses: ["0.0.0.0/0"] } }],
+  };
+  // ...that a database trusts as a source.
+  const db = { id: "db-x", name: "orders-pg", engine: "pg", connection: { host: "h", port: 25060 } };
+  const dbTrustsDroplet = { "db-x": [{ type: "droplet", value: "700" }] };
+
+  const fullInventory = (over: Record<string, unknown> = {}) =>
+    inventory({
+      droplets: [publicOpenDroplet as never],
+      firewalls: [openFirewall as never],
+      databases: [db as never],
+      databaseFirewalls: dbTrustsDroplet as never,
+      ...over,
+    });
+
+  it("reports the datastore as reachable when a trusted workload is internet-exposed", () => {
+    const result = evaluateExposure(ACCOUNT, fullInventory());
+    const path = result.findings.find((f) => f.kind === "path.public_workload_to_datastore");
+    expect(path).toBeDefined();
+    expect(path!.resourceExternalId).toBe("do:dbaas:db-x");
+    expect(path!.severity).toBe("high");
+    expect(path!.confidence).toBe("derived");
+    // The datastore's exposure is indirect, so the path does not mark it internet-exposed.
+    expect(path!.provesInternetExposure).toBe(false);
+    expect(result.exposedResourceIds.has("do:dbaas:db-x")).toBe(false);
+    // ...but the exposed workload itself is in the set (from phase one).
+    expect(result.exposedResourceIds.has("do:droplet:700")).toBe(true);
+    expect(path!.coverageKeys).toEqual(
+      expect.arrayContaining(["databases", "database_firewall:db-x", "digitalocean.droplet"]),
+    );
+  });
+
+  it("does NOT report a path when the trusted workload is not internet-exposed", () => {
+    // Same trust edge, but the droplet's firewall only admits SSH from a bastion range, so
+    // phase one never marks it exposed and the path does not complete.
+    const bastionFirewall = {
+      ...openFirewall,
+      inbound_rules: [{ protocol: "tcp", ports: "22", sources: { addresses: ["198.51.100.0/24"] } }],
+    };
+    const result = evaluateExposure(ACCOUNT, fullInventory({ firewalls: [bastionFirewall as never] }));
+    expect(result.findings.some((f) => f.kind === "path.public_workload_to_datastore")).toBe(false);
+  });
+
+  it("does NOT treat a database that only trusts 0.0.0.0/0 as a workload path", () => {
+    // A whole-internet trusted source is a direct-exposure finding, not a trust edge, so no
+    // path rule fires off it.
+    const result = evaluateExposure(
+      ACCOUNT,
+      fullInventory({ databaseFirewalls: { "db-x": [{ type: "ip_addr", value: "0.0.0.0/0" }] } as never }),
+    );
+    expect(result.findings.some((f) => f.kind === "path.public_workload_to_datastore")).toBe(false);
+  });
+});
+
 describe("engine", () => {
   it("returns findings sorted by severity and marks exposed resources", () => {
     const result = evaluateExposure(

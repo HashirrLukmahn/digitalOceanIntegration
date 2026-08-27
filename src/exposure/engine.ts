@@ -1,4 +1,5 @@
 import type { RawInventory } from "../do/collectors";
+import { deriveRelationships, type DerivedRelationship } from "../relationships/derive";
 import { bySeverityDescending } from "./severity";
 import {
   databasePublicNoTrustedSourcesRule,
@@ -19,7 +20,15 @@ import {
   kubernetesUpgradeAvailableRule,
 } from "./rules/kubernetes";
 import { spacePublicReadRule } from "./rules/space";
-import { buildContext, fingerprint, type DraftFinding, type ExposureRule } from "./types";
+import { publicWorkloadToDatastoreRule } from "./rules/path";
+import {
+  buildContext,
+  fingerprint,
+  type DraftFinding,
+  type ExposureRule,
+  type PathContext,
+  type PathRule,
+} from "./types";
 
 /**
  * The exposure engine.
@@ -46,6 +55,13 @@ export const RULES: readonly ExposureRule[] = [
   spacePublicReadRule,
 ];
 
+/**
+ * Path rules run in a second phase, after {@link RULES}, so they can read the base
+ * findings and the trust graph. They describe *combinations* -- an exposed workload a
+ * datastore trusts -- rather than single-resource misconfigurations.
+ */
+export const PATH_RULES: readonly PathRule[] = [publicWorkloadToDatastoreRule];
+
 export interface EvaluatedFinding extends DraftFinding {
   /** Stable fingerprint; the primary key of `exposure_findings`. */
   id: string;
@@ -57,37 +73,61 @@ export interface ExposureResult {
   exposedResourceIds: Set<string>;
 }
 
+export interface EvaluateOptions {
+  rules?: readonly ExposureRule[];
+  pathRules?: readonly PathRule[];
+  now?: Date;
+  /** Pre-derived relationships; recomputed from the inventory if omitted. */
+  relationships?: readonly DerivedRelationship[];
+}
+
 export function evaluateExposure(
   accountId: string,
   inventory: RawInventory,
-  rules: readonly ExposureRule[] = RULES,
-  now: Date = new Date(),
+  options: EvaluateOptions = {},
 ): ExposureResult {
+  const rules = options.rules ?? RULES;
+  const pathRules = options.pathRules ?? PATH_RULES;
+  const now = options.now ?? new Date();
   const context = buildContext(inventory, now);
+
   const findings: EvaluatedFinding[] = [];
   const seen = new Set<string>();
+  const collect = (draft: DraftFinding): void => {
+    const id = fingerprint(accountId, draft);
+    // Two rules could in principle converge on the same fingerprint; keep the first
+    // so a run cannot produce duplicate primary keys.
+    if (seen.has(id)) return;
+    seen.add(id);
+    findings.push({ ...draft, id });
+  };
 
+  // --- Phase 1: base rules -------------------------------------------------------
   for (const rule of rules) {
-    for (const draft of rule.evaluate(context)) {
-      const id = fingerprint(accountId, draft);
-      // Two rules could in principle converge on the same fingerprint; keep the first
-      // so a run cannot produce duplicate primary keys.
-      if (seen.has(id)) continue;
-      seen.add(id);
-      findings.push({ ...draft, id });
-    }
+    for (const draft of rule.evaluate(context)) collect(draft);
+  }
+
+  // Only reachability findings mark a resource as internet-exposed. This set is computed
+  // from phase one alone, and it is what the path rules build on -- a path finding is about
+  // *indirect* reachability, so it never adds to this set.
+  const exposedResourceIds = new Set(
+    findings.filter((f) => f.provesInternetExposure).map((f) => f.resourceExternalId),
+  );
+
+  // --- Phase 2: path rules -------------------------------------------------------
+  const relationships = options.relationships ?? deriveRelationships(inventory);
+  const findingsByResource = new Map<string, DraftFinding[]>();
+  for (const finding of findings) {
+    const list = findingsByResource.get(finding.resourceExternalId) ?? [];
+    list.push(finding);
+    findingsByResource.set(finding.resourceExternalId, list);
+  }
+  const pathContext: PathContext = { ...context, relationships, exposedResourceIds, findingsByResource };
+  for (const rule of pathRules) {
+    for (const draft of rule.evaluate(pathContext)) collect(draft);
   }
 
   findings.sort(bySeverityDescending);
 
-  return {
-    findings,
-    // Only reachability findings mark a resource as internet-exposed. Every finding now
-    // states this explicitly, so there is no default to reason about here.
-    exposedResourceIds: new Set(
-      findings
-        .filter((f) => f.provesInternetExposure)
-        .map((f) => f.resourceExternalId),
-    ),
-  };
+  return { findings, exposedResourceIds };
 }
